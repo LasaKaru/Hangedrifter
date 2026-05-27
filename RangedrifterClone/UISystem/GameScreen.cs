@@ -143,7 +143,11 @@ public class GameScreen : ScreenObject
 
             int sx = pos.X - _camX + 1, sy = pos.Y - _camY + 1;
             if (sx >= 1 && sx < MapW - 1 && sy >= 1 && sy < MapH - 1)
-                _mapPanel.SetGlyph(sx, sy, render.Glyph, render.Foreground, Color.Black);
+            {
+                // Use the entity's own Background (robot glow halo, or Transparent → black)
+                var entBg = render.Background == Color.Transparent ? Color.Black : render.Background;
+                _mapPanel.SetGlyph(sx, sy, render.Glyph, render.Foreground, entBg);
+            }
         }
 
         // Floor / terrain labels (bottom-right corner)

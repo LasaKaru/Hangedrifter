@@ -99,18 +99,22 @@ public class GameEngine
         // Robot character — colour reflects chosen class
         var robotColor = cls.Id switch
         {
-            "warrior" => new SadRogue.Primitives.Color(225, 145,  55),  // amber/gold armour
-            "rogue"   => new SadRogue.Primitives.Color(185,  80, 200),  // violet stealth
-            "mage"    => new SadRogue.Primitives.Color( 70, 165, 245),  // electric blue
-            _         => new SadRogue.Primitives.Color(210, 105,  68),  // default robot orange
+            "warrior" => new SadRogue.Primitives.Color(255, 165,  60),  // amber/gold
+            "rogue"   => new SadRogue.Primitives.Color(210,  90, 230),  // violet
+            "mage"    => new SadRogue.Primitives.Color( 80, 185, 255),  // electric blue
+            _         => new SadRogue.Primitives.Color(230, 115,  70),  // robot orange
         };
+        // Warm glow halo behind the robot so it pops against dark floors
+        var robotBg = new SadRogue.Primitives.Color(50, 25, 10);
 
         EntityManager.AddComponent(p, new PositionComponent { X = pos.X, Y = pos.Y });
         EntityManager.AddComponent(p, new RenderComponent
         {
-            // ☻ (U+263B / CP437 char 2) — filled smiley = robot face
-            Glyph = '☻', Foreground = robotColor,
-            Background = SadRogue.Primitives.Color.Transparent, RenderLayer = 10
+            // '\x02' = CP437 glyph index 2 = ☻ (filled smiley / robot face).
+            // Must use the byte-value form — '☻' (U+263B = 9275) is outside
+            // the 0-255 glyph-index range and renders as blank in SadConsole.
+            Glyph = '\x02', Foreground = robotColor,
+            Background = robotBg, RenderLayer = 10
         });
         EntityManager.AddComponent(p, new FighterComponent
         {

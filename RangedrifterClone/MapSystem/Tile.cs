@@ -26,34 +26,34 @@ public class Tile
         {
             MapTheme.Cave =>
                 r < 0.65
-                ? MT(TileType.Floor,'.', C(72,115,85), C(28,44,33), C(4,7,5),   "Cave Floor")
-                : MT(TileType.Floor,',', C(65,108,78), C(25,42,30), C(4,7,5),   "Cave Floor"),
+                ? MT(TileType.Floor,'.', C(100,155,115), C(40,62,46), C(6,10,7),  "Cave Floor")
+                : MT(TileType.Floor,',', C( 90,145,105), C(36,58,42), C(6,10,7),  "Cave Floor"),
 
             MapTheme.Forest =>
                 r < 0.55
-                ? MT(TileType.Floor,'"', C(55,148,55), C(22,60,22), C(3,11,3),  "Grass")
+                ? MT(TileType.Floor,'"', C( 75,185, 75), C(30,74,30), C(5,14,5),  "Grass")
                 : r < 0.82
-                ? MT(TileType.Floor,'.', C(60,138,50), C(24,55,20), C(3,11,3),  "Grass")
-                : MT(TileType.Floor,',', C(50,128,45), C(20,51,18), C(3,11,3),  "Grass"),
+                ? MT(TileType.Floor,'.', C( 80,175, 65), C(32,70,26), C(5,14,5),  "Grass")
+                : MT(TileType.Floor,',', C( 70,165, 60), C(28,66,24), C(5,14,5),  "Grass"),
 
             MapTheme.Crypt =>
                 r < 0.78
-                ? MT(TileType.Floor,'.', C(82,82,128), C(33,33,51), C(5,5,10),  "Crypt Floor")
-                : MT(TileType.Floor,',', C(90,88,135), C(36,35,54), C(5,5,10),  "Crypt Floor"),
+                ? MT(TileType.Floor,'.', C(110,108,165), C(44,43,66), C(7,7,13),  "Crypt Floor")
+                : MT(TileType.Floor,',', C(120,115,175), C(48,46,70), C(7,7,13),  "Crypt Floor"),
 
             MapTheme.Mines =>
                 r < 0.70
-                ? MT(TileType.Floor,'.', C(115,100,74), C(46,40,30), C(8,7,5),  "Mine Floor")
+                ? MT(TileType.Floor,'.', C(148,128, 95), C(59,51,38), C(10,9,6),  "Mine Floor")
                 : r < 0.90
-                ? MT(TileType.Floor,',', C(108,93,68),  C(43,37,27), C(8,7,5),  "Mine Floor")
-                : MT(TileType.Floor,'\'',C(120,106,76), C(48,42,30), C(8,7,5),  "Mine Floor"),
+                ? MT(TileType.Floor,',', C(138,118, 88), C(55,47,35), C(10,9,6),  "Mine Floor")
+                : MT(TileType.Floor,'\'',C(155,135,100), C(62,54,40), C(10,9,6),  "Mine Floor"),
 
-            _ => // Dungeon
+            _ => // Dungeon — warm green stone
                 r < 0.72
-                ? MT(TileType.Floor,'.', C(90,128,90), C(36,51,36), C(5,9,5),   "Floor")
+                ? MT(TileType.Floor,'.', C(115,160,115), C(46,64,46), C(7,11,7),  "Floor")
                 : r < 0.90
-                ? MT(TileType.Floor,',', C(82,118,82), C(33,47,33), C(5,9,5),   "Floor")
-                : MT(TileType.Floor,'`', C(85,122,85), C(34,49,34), C(5,9,5),   "Floor"),
+                ? MT(TileType.Floor,',', C(105,150,105), C(42,60,42), C(7,11,7),  "Floor")
+                : MT(TileType.Floor,'`', C(110,155,110), C(44,62,44), C(7,11,7),  "Floor"),
         };
     }
 
@@ -67,11 +67,12 @@ public class Tile
     // ═════════════════════════════════════════════════════════════════════
     public static Tile CreateWall(MapTheme theme = MapTheme.Dungeon) => theme switch
     {
-        MapTheme.Cave   => MW3d(C(85, 95,108), C(118,132,150), C(34,38,43), "Cave Wall"),
-        MapTheme.Crypt  => MW3d(C(95, 85,118), C(128,115,158), C(38,34,47), "Bone Wall"),
-        MapTheme.Mines  => MW3d(C(115,95, 62), C(155,128, 85), C(46,38,25), "Rock Wall"),
+        // front face (fg), lit top face (bg), explored dim (fg dark)
+        MapTheme.Cave   => MW3d(C(108,122,140), C(148,165,185), C(43,49,56), "Cave Wall"),
+        MapTheme.Crypt  => MW3d(C(120,108,155), C(162,148,200), C(48,43,62), "Bone Wall"),
+        MapTheme.Mines  => MW3d(C(145,122, 80), C(195,165,108), C(58,49,32), "Rock Wall"),
         MapTheme.Forest => MWTree(),
-        _               => MW3d(C(132,115, 85), C(185,165,128), C(53,46,34), "Wall"),
+        _               => MW3d(C(158,140,105), C(210,190,150), C(63,56,42), "Wall"),
     };
 
     /// <summary>
