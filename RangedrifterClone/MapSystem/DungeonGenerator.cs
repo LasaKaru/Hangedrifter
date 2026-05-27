@@ -49,6 +49,7 @@ public class DungeonGenerator
         CreateRooms(root);
         ConnectRooms(root);
         PlaceWalls();
+        PostProcessWallGlyphs();   // replace '#' with box-drawing chars
 
         var rooms = new List<(BspNode node, RoomRect rect)>();
         CollectRooms(root, rooms);
@@ -130,7 +131,7 @@ public class DungeonGenerator
     {
         for (int y = r.Y; y < r.Y + r.Height; y++)
         for (int x = r.X; x < r.X + r.Width;  x++)
-            _map.SetTile(x, y, Tile.CreateFloor(_theme));
+            _map.SetTile(x, y, Tile.CreateFloor(_theme, _rng));
     }
 
     private void ConnectRooms(BspNode node)
@@ -149,9 +150,9 @@ public class DungeonGenerator
     private void CarveCorridorL(SadRogue.Primitives.Point a, SadRogue.Primitives.Point b)
     {
         int x = a.X, y = a.Y;
-        while (x != b.X) { _map.SetTile(x, y, Tile.CreateFloor(_theme)); x += (b.X > x) ? 1 : -1; }
-        while (y != b.Y) { _map.SetTile(x, y, Tile.CreateFloor(_theme)); y += (b.Y > y) ? 1 : -1; }
-        _map.SetTile(x, y, Tile.CreateFloor(_theme));
+        while (x != b.X) { _map.SetTile(x, y, Tile.CreateFloor(_theme, _rng)); x += (b.X > x) ? 1 : -1; }
+        while (y != b.Y) { _map.SetTile(x, y, Tile.CreateFloor(_theme, _rng)); y += (b.Y > y) ? 1 : -1; }
+        _map.SetTile(x, y, Tile.CreateFloor(_theme, _rng));
     }
 
     private RoomRect? GetRoom(BspNode node)
@@ -333,6 +334,69 @@ public class DungeonGenerator
             else if (r < 0.020 && _theme == MapTheme.Cave)  _map.SetTile(x, y, Tile.CreateWater());
         }
     }
+
+    // ── Wall glyph post-processing ───────────────────────────────────────
+    /// <summary>
+    /// Replaces each wall tile's '#' glyph with the appropriate box-drawing
+    /// character based on its 4 cardinal neighbours.  Forest trees are left
+    /// as-is (they don't "connect" to each other like stone walls).
+    /// Interior walls (surrounded entirely by other walls / void) are set to
+    /// a space so they render as pure dark background — giving a clean look.
+    /// </summary>
+    private void PostProcessWallGlyphs()
+    {
+        // Forest theme uses standalone tree characters — no box-drawing needed.
+        if (_theme == MapTheme.Forest) return;
+
+        for (int y = 0; y < _height; y++)
+        for (int x = 0; x < _width;  x++)
+        {
+            var tile = _map.GetTile(x, y);
+            if (tile.Type != TileType.Wall) continue;
+
+            // Interior walls (no floor neighbor on any of 8 sides) → solid dark fill.
+            bool anyFloor = false;
+            for (int dy = -1; dy <= 1 && !anyFloor; dy++)
+            for (int dx = -1; dx <= 1 && !anyFloor; dx++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                if (IsFloor(x + dx, y + dy)) anyFloor = true;
+            }
+            if (!anyFloor)
+            {
+                tile.Glyph = ' ';   // deep interior — shows as background colour
+                continue;
+            }
+
+            // Boundary wall — pick box-drawing char by cardinal wall connectivity.
+            bool n = IsWallOrVoid(x, y - 1);
+            bool s = IsWallOrVoid(x, y + 1);
+            bool e = IsWallOrVoid(x + 1, y);
+            bool w = IsWallOrVoid(x - 1, y);
+
+            tile.Glyph = (n, s, e, w) switch
+            {
+                (true,  true,  true,  true ) => '┼',
+                (true,  true,  true,  false) => '├',
+                (true,  true,  false, true ) => '┤',
+                (false, true,  true,  true ) => '┬',
+                (true,  false, true,  true ) => '┴',
+                (true,  true,  false, false) => '│',
+                (false, false, true,  true ) => '─',
+                (true,  false, false, true ) => '┘',
+                (true,  false, true,  false) => '└',
+                (false, true,  false, true ) => '┐',
+                (false, true,  true,  false) => '┌',
+                _ => '#',   // pillar or single-arm stub
+            };
+        }
+    }
+
+    private bool IsFloor(int x, int y) =>
+        _map.InBounds(x, y) && _map.GetTile(x, y).Type == TileType.Floor;
+
+    private bool IsWallOrVoid(int x, int y) =>
+        !_map.InBounds(x, y) || _map.GetTile(x, y).Type is TileType.Wall or TileType.Empty;
 
     // ── Utilities ────────────────────────────────────────────────────────
     private void CollectRooms(BspNode node, List<(BspNode, RoomRect)> rooms)

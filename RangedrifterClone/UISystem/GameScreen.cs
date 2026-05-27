@@ -105,9 +105,18 @@ public class GameScreen : ScreenObject
         {
             var tile = map.GetTile(_camX + sx - 1, _camY + sy - 1);
             if (tile.IsVisible)
-                _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundVisible, tile.Background);
+            {
+                // Visible tiles: full colour + subtle tinted background for floor
+                var bg = tile.Type == TileType.Floor || tile.Type == TileType.Bush
+                       ? tile.Background   // already has slight tint
+                       : Color.Black;
+                _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundVisible, bg);
+            }
             else if (tile.IsExplored)
-                _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundExplored, tile.Background);
+            {
+                // Explored-but-dark: heavily dimmed, no background tint
+                _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundExplored, Color.Black);
+            }
         }
 
         // Entities (sorted by layer — lowest drawn first)
