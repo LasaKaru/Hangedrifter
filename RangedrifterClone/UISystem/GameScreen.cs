@@ -29,10 +29,11 @@ public class GameScreen : ScreenObject
     private readonly ScreenSurface _sidebar;
     private readonly ScreenSurface _msgPanel;
 
-    private int  _camX, _camY;
-    private bool _gameOverShown;
-    private bool _equipMode;
-    private int  _abilityDirState = 0; // 0 = none, 1-4 = waiting for direction
+    private int    _camX, _camY;
+    private bool   _gameOverShown;
+    private bool   _equipMode;
+    private int    _abilityDirState = 0; // 0 = none, 1-4 = waiting for direction
+    private double _glowTime        = 0; // accumulated seconds — drives the glow pulse
 
     private static readonly Color LabelClr  = new(140, 140, 140);
     private static readonly Color ValueClr  = new(200, 200, 100);
@@ -67,6 +68,7 @@ public class GameScreen : ScreenObject
     public override void Update(TimeSpan delta)
     {
         base.Update(delta);
+        _glowTime += delta.TotalSeconds;   // always tick so glow animates smoothly
         var st = GameEngine.Instance.State;
         if (st == GameState.Playing || st == GameState.GameOver)
         {
@@ -150,12 +152,80 @@ public class GameScreen : ScreenObject
             }
         }
 
+        // Glow aura (applied after tiles + entities so it tints backgrounds)
+        ApplyPlayerGlow(map);
+
         // Floor / terrain labels (bottom-right corner)
         RenderTerrainLabels(map);
 
         // Floor number
         string floorLabel = $"Floor {GameEngine.Instance.CurrentFloor}";
         _mapPanel.Print(MapW - floorLabel.Length - 1, 1, floorLabel, new Color(100, 100, 160));
+    }
+
+    // ── Player glow aura ──────────────────────────────────────────────────
+    /// <summary>
+    /// Simulates a bloom/glow effect in text mode.  Each frame:
+    ///   • Adjacent cells (radius 0-3) receive a tinted background that
+    ///     fades to black as distance increases.
+    ///   • The player cell itself pulses brighter at ~2 Hz via a sin wave.
+    /// All colours are derived from the player's own class colour so the
+    /// glow matches: amber for Warrior, violet for Rogue, blue for Mage.
+    /// </summary>
+    private void ApplyPlayerGlow(GameMap map)
+    {
+        var em     = GameEngine.Instance.EntityManager;
+        var player = GameEngine.Instance.PlayerEntity;
+        var pos    = em.GetComponent<PositionComponent>(player);
+        var rend   = em.GetComponent<RenderComponent>(player);
+        if (pos == null || rend == null) return;
+
+        // Pulse: smoothly oscillates 0.55 → 1.0 at ~2 Hz
+        float pulse = (float)(0.55 + 0.45 * Math.Sin(_glowTime * Math.PI * 2.0));
+
+        var c = rend.Foreground;   // class colour is the glow source
+
+        // ── Halo rings ───────────────────────────────────────────────
+        const int Radius = 3;
+        for (int dy = -Radius; dy <= Radius; dy++)
+        for (int dx = -Radius; dx <= Radius; dx++)
+        {
+            if (dx == 0 && dy == 0) continue;
+
+            float dist = MathF.Sqrt(dx * dx + dy * dy);
+            if (dist > Radius + 0.5f) continue;
+
+            int wx = pos.X + dx, wy = pos.Y + dy;
+            if (!map.GetTile(wx, wy).IsVisible) continue;
+
+            int sx = wx - _camX + 1, swy = wy - _camY + 1;
+            if (sx < 1 || sx >= MapW - 1 || swy < 1 || swy >= MapH - 1) continue;
+
+            // Intensity: strong nearby, falls off quadratically, modulated by pulse
+            float intensity = (1f - dist / (Radius + 1f));
+            intensity = intensity * intensity * 0.45f * pulse;
+
+            _mapPanel.SetBackground(sx, swy, new Color(
+                (byte)(c.R * intensity),
+                (byte)(c.G * intensity),
+                (byte)(c.B * intensity)));
+        }
+
+        // ── Player cell: pulsing bright glyph ────────────────────────
+        int psx = pos.X - _camX + 1, psy = pos.Y - _camY + 1;
+        if (psx >= 1 && psx < MapW - 1 && psy >= 1 && psy < MapH - 1)
+        {
+            float bright = 0.80f + 0.20f * pulse;
+            var fg = new Color(
+                (byte)Math.Min(255, (int)(c.R * bright) + (int)(50 * pulse)),
+                (byte)Math.Min(255, (int)(c.G * bright) + (int)(35 * pulse)),
+                (byte)Math.Min(255, (int)(c.B * bright) + (int)(20 * pulse)));
+            var bg = new Color(
+                (byte)(c.R * 0.28f * pulse),
+                (byte)(c.G * 0.22f * pulse),
+                (byte)(c.B * 0.18f * pulse));
+            _mapPanel.SetGlyph(psx, psy, rend.Glyph, fg, bg);
+        }
     }
 
     private void RenderTerrainLabels(GameMap map)
