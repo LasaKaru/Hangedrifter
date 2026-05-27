@@ -64,27 +64,36 @@ public class DungeonGenerator
     }
 
     // ── BSP splitting ────────────────────────────────────────────────────
+    // MinSplitSize: both axes need at least this many cells before we'll try
+    // to split along that axis.  Keeps leaf nodes large enough for rooms.
+    private const int MinSplitSize = 12;
+
     private void SplitNode(BspNode node, int depth)
     {
-        if (depth >= 6 || (node.W < 16 && node.H < 16)) return;
+        bool canH = node.H >= MinSplitSize;
+        bool canV = node.W >= MinSplitSize;
+        if (depth >= 6 || (!canH && !canV)) return;
 
-        bool splitH = node.H > node.W || (node.W == node.H && _rng.NextDouble() > 0.5);
-        if (splitH && node.H < 16) splitH = false;
-        if (!splitH && node.W < 16) splitH = true;
+        bool splitH;
+        if (canH && canV)
+            splitH = node.H > node.W || (node.W == node.H && _rng.NextDouble() > 0.5);
+        else
+            splitH = canH;   // only one axis is large enough
 
         if (splitH)
         {
-            int split = _rng.Next(6, node.H - 6);
+            // margin of 6 on each side guarantees children have H >= 6
+            int split = _rng.Next(6, node.H - 6 + 1);   // inclusive range [6 .. H-6]
             node.Left  = new BspNode(node.X, node.Y, node.W, split);
             node.Right = new BspNode(node.X, node.Y + split, node.W, node.H - split);
         }
         else
         {
-            int split = _rng.Next(6, node.W - 6);
+            int split = _rng.Next(6, node.W - 6 + 1);
             node.Left  = new BspNode(node.X, node.Y, split, node.H);
             node.Right = new BspNode(node.X + split, node.Y, node.W - split, node.H);
         }
-        SplitNode(node.Left, depth + 1);
+        SplitNode(node.Left,  depth + 1);
         SplitNode(node.Right, depth + 1);
     }
 
@@ -92,10 +101,23 @@ public class DungeonGenerator
     {
         if (node.Left == null && node.Right == null)
         {
-            int rw = _rng.Next(5, Math.Min(node.W - 2, 20));
-            int rh = _rng.Next(4, Math.Min(node.H - 2, 16));
-            int rx = node.X + _rng.Next(1, Math.Max(2, node.W - rw - 1));
-            int ry = node.Y + _rng.Next(1, Math.Max(2, node.H - rh - 1));
+            // Minimum room: 5 wide × 4 tall. Skip leaf nodes that are too small.
+            // (node.W - 2) must be >= 5  →  node.W >= 7
+            // (node.H - 2) must be >= 4  →  node.H >= 6
+            if (node.W < 7 || node.H < 6) return;
+
+            int maxRw = Math.Min(node.W - 2, 20);
+            int maxRh = Math.Min(node.H - 2, 16);
+            // Next(min, max) where min == max returns min, so this is always safe.
+            int rw = _rng.Next(5, maxRw + 1);   // [5 .. maxRw]
+            int rh = _rng.Next(4, maxRh + 1);   // [4 .. maxRh]
+
+            // Margin so the room doesn't touch the node edge.
+            int maxOfsX = Math.Max(1, node.W - rw - 1);
+            int maxOfsY = Math.Max(1, node.H - rh - 1);
+            int rx = node.X + _rng.Next(1, maxOfsX + 1);
+            int ry = node.Y + _rng.Next(1, maxOfsY + 1);
+
             node.Room = new RoomRect(rx, ry, rw, rh);
             CarveRoom(node.Room.Value);
             return;
@@ -212,6 +234,8 @@ public class DungeonGenerator
         for (int i = 1; i < rooms.Count; i++)
         {
             var (node, rect) = rooms[i];
+            if (rect.Width < 3 || rect.Height < 3) continue;   // safety guard
+
             bool isBoss = node.Tag == RoomTag.Boss;
 
             int enemyCount = isBoss
@@ -268,6 +292,8 @@ public class DungeonGenerator
     {
         foreach (var (node, rect) in rooms.Skip(1))
         {
+            if (rect.Width < 3 || rect.Height < 3) continue;   // safety guard
+
             // Chests in treasury and occasionally normal rooms
             if (node.Tag == RoomTag.Treasury || _rng.NextDouble() < 0.15)
             {
