@@ -573,6 +573,6 @@ public class GameEngine
     }
 }
 
-public enum GameState   { MainMenu, CharacterCreation, Playing, Inventory, GameOver }
+public enum GameState   { MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings }
 public enum PlayerAction { MoveNorth, MoveSouth, MoveEast, MoveWest,
     MoveNE, MoveNW, MoveSE, MoveSW, PickUp, Wait, UseItem, OpenInventory, CloseInventory }

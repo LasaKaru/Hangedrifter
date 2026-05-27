@@ -4,7 +4,7 @@ using RangedrifterClone.Core;
 namespace RangedrifterClone.UISystem;
 
 /// <summary>
-/// Top-level screen. Routes between MainMenu → CharacterCreation → GameScreen
+/// Top-level screen. Routes between MainMenu → CharacterCreation → GameScreen → Settings
 /// based on GameEngine.State, with no tight coupling between panels.
 /// </summary>
 public class RootScreen : ScreenObject
@@ -12,6 +12,7 @@ public class RootScreen : ScreenObject
     private MainMenuScreen?          _mainMenu;
     private CharacterCreationScreen? _charCreate;
     private GameScreen?              _gameScreen;
+    private SettingsScreen?          _settings;
     private GameState                _lastState = GameState.MainMenu;
 
     public RootScreen()
@@ -36,6 +37,17 @@ public class RootScreen : ScreenObject
             case GameState.MainMenu:
                 _mainMenu!.IsVisible = true;
                 _mainMenu.IsFocused  = true;
+                break;
+
+            case GameState.Settings:
+                if (_settings == null)
+                {
+                    _settings = new SettingsScreen();
+                    Children.Add(_settings);
+                }
+                _settings.Refresh();
+                _settings.IsVisible = true;
+                _settings.IsFocused = true;
                 break;
 
             case GameState.CharacterCreation:
@@ -73,6 +85,7 @@ public class RootScreen : ScreenObject
     private void HideAll()
     {
         if (_mainMenu   != null) _mainMenu.IsVisible   = false;
+        if (_settings   != null) _settings.IsVisible   = false;
         if (_charCreate != null) _charCreate.IsVisible = false;
         if (_gameScreen != null) _gameScreen.IsVisible = false;
     }
