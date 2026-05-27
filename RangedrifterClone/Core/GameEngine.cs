@@ -96,10 +96,20 @@ public class GameEngine
     {
         var p = EntityManager.CreateEntity();
 
+        // Robot character — colour reflects chosen class
+        var robotColor = cls.Id switch
+        {
+            "warrior" => new SadRogue.Primitives.Color(225, 145,  55),  // amber/gold armour
+            "rogue"   => new SadRogue.Primitives.Color(185,  80, 200),  // violet stealth
+            "mage"    => new SadRogue.Primitives.Color( 70, 165, 245),  // electric blue
+            _         => new SadRogue.Primitives.Color(210, 105,  68),  // default robot orange
+        };
+
         EntityManager.AddComponent(p, new PositionComponent { X = pos.X, Y = pos.Y });
         EntityManager.AddComponent(p, new RenderComponent
         {
-            Glyph = '@', Foreground = SadRogue.Primitives.Color.Yellow,
+            // ☻ (U+263B / CP437 char 2) — filled smiley = robot face
+            Glyph = '☻', Foreground = robotColor,
             Background = SadRogue.Primitives.Color.Transparent, RenderLayer = 10
         });
         EntityManager.AddComponent(p, new FighterComponent

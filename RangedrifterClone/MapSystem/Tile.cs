@@ -58,17 +58,51 @@ public class Tile
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // Wall — base glyph '#'; DungeonGenerator.PostProcessWallGlyphs()
-    //        replaces it with box-drawing chars after the map is built.
-    //        Forest theme uses '♣' (trees) and is not post-processed.
+    // Wall — pseudo-3D half-block rendering.
+    //   Glyph      : '▄' (lower-half block)
+    //   Foreground : front/shadow face colour (darker)
+    //   Background : top/lit face colour (lighter) — only shows when visible
+    //   Interior walls become ' ' in PostProcessWallGlyphs so deep stone
+    //   reads as pure black; forest trees stay as '♣' (no 3-D connect).
     // ═════════════════════════════════════════════════════════════════════
     public static Tile CreateWall(MapTheme theme = MapTheme.Dungeon) => theme switch
     {
-        MapTheme.Cave   => MW(TileType.Wall,'#', C(95,108,122), C(38,43,49), "Cave Wall"),
-        MapTheme.Crypt  => MW(TileType.Wall,'#', C(108,96,132), C(43,38,53), "Bone Wall"),
-        MapTheme.Mines  => MW(TileType.Wall,'#', C(128,108,68), C(51,43,27), "Rock Wall"),
-        MapTheme.Forest => MW(TileType.Wall,'\x05', C(45,118,35), C(18,47,14), "Tree"),  // ♣ CP437
-        _               => MW(TileType.Wall,'#', C(148,132,98), C(59,53,39), "Wall"),
+        MapTheme.Cave   => MW3d(C(85, 95,108), C(118,132,150), C(34,38,43), "Cave Wall"),
+        MapTheme.Crypt  => MW3d(C(95, 85,118), C(128,115,158), C(38,34,47), "Bone Wall"),
+        MapTheme.Mines  => MW3d(C(115,95, 62), C(155,128, 85), C(46,38,25), "Rock Wall"),
+        MapTheme.Forest => MWTree(),
+        _               => MW3d(C(132,115, 85), C(185,165,128), C(53,46,34), "Wall"),
+    };
+
+    /// <summary>
+    /// 3-D wall tile using ▄ half-block.
+    /// Top half of cell → Background (lit top face).
+    /// Bottom half      → Foreground (shaded front face).
+    /// Explored dim     → front face only at ~20 % brightness; bg = black.
+    /// </summary>
+    private static Tile MW3d(
+        SadRogue.Primitives.Color front,
+        SadRogue.Primitives.Color top,
+        SadRogue.Primitives.Color frontDim,
+        string name) => new()
+    {
+        Type = TileType.Wall, IsWalkable = false, BlocksLight = true,
+        Glyph              = '▄',
+        ForegroundVisible  = front,
+        ForegroundExplored = frontDim,
+        Background         = top,          // lit top face (only used when visible)
+        Name               = name
+    };
+
+    /// <summary>Forest tree — standalone ♣ glyph, no half-block 3-D.</summary>
+    private static Tile MWTree() => new()
+    {
+        Type = TileType.Wall, IsWalkable = false, BlocksLight = true,
+        Glyph              = '♣',
+        ForegroundVisible  = C(45,118,35),
+        ForegroundExplored = C(18,47,14),
+        Background         = C(0,0,0),
+        Name               = "Tree"
     };
 
     // ═════════════════════════════════════════════════════════════════════
@@ -122,19 +156,6 @@ public class Tile
         Name               = name
     };
 
-    /// <summary>Wall helper — always non-walkable, always blocks light.</summary>
-    private static Tile MW(TileType type, char glyph,
-        SadRogue.Primitives.Color fgVis,
-        SadRogue.Primitives.Color fgExp,
-        string name) => new()
-    {
-        Type = type, IsWalkable = false, BlocksLight = true,
-        Glyph = glyph,
-        ForegroundVisible  = fgVis,
-        ForegroundExplored = fgExp,
-        Background         = new(0, 0, 0),
-        Name               = name
-    };
 
     private static SadRogue.Primitives.Color C(byte r, byte g, byte b) => new(r, g, b);
 }

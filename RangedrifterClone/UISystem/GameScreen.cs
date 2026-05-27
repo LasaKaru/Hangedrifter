@@ -99,24 +99,29 @@ public class GameScreen : ScreenObject
         for (int sx = 1; sx < MapW - 1; sx++)
             _mapPanel.SetGlyph(sx, sy, ' ', Color.Black, Color.Black);
 
-        // Tiles
+        // ── Tiles ─────────────────────────────────────────────────────
+        // Unexplored : pure black (automatic — cleared to black above)
+        // Explored   : tile glyph at ~20% brightness, black background
+        // Visible    : full colour; walls get the lit top-face background
+        //              (half-block ▄ trick → two-colour 3-D block illusion)
         for (int sy = 1; sy < MapH - 1; sy++)
         for (int sx = 1; sx < MapW - 1; sx++)
         {
             var tile = map.GetTile(_camX + sx - 1, _camY + sy - 1);
             if (tile.IsVisible)
             {
-                // Visible tiles: full colour + subtle tinted background for floor
-                var bg = tile.Type == TileType.Floor || tile.Type == TileType.Bush
-                       ? tile.Background   // already has slight tint
-                       : Color.Black;
+                // Walls: bg = lit top-face; floors: subtle tint bg
+                var bg = tile.Type is TileType.Wall
+                       ? tile.Background           // lighter top-face for 3-D effect
+                       : tile.Background;          // slight tint already set in Tile
                 _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundVisible, bg);
             }
             else if (tile.IsExplored)
             {
-                // Explored-but-dark: heavily dimmed, no background tint
+                // Dim ghost — no 3-D top-face, just the silhouette
                 _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundExplored, Color.Black);
             }
+            // else: unexplored stays black (cleared at start of RenderMap)
         }
 
         // Entities (sorted by layer — lowest drawn first)

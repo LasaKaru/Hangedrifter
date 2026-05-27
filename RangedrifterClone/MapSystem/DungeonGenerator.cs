@@ -345,7 +345,7 @@ public class DungeonGenerator
     /// </summary>
     private void PostProcessWallGlyphs()
     {
-        // Forest theme uses standalone tree characters — no box-drawing needed.
+        // Forest trees are standalone ♣ — no half-block 3-D needed.
         if (_theme == MapTheme.Forest) return;
 
         for (int y = 0; y < _height; y++)
@@ -354,7 +354,8 @@ public class DungeonGenerator
             var tile = _map.GetTile(x, y);
             if (tile.Type != TileType.Wall) continue;
 
-            // Interior walls (no floor neighbor on any of 8 sides) → solid dark fill.
+            // Interior walls (no floor on any of 8 neighbours) → space.
+            // They show as pure black — the dungeon feels deep and solid.
             bool anyFloor = false;
             for (int dy = -1; dy <= 1 && !anyFloor; dy++)
             for (int dx = -1; dx <= 1 && !anyFloor; dx++)
@@ -364,31 +365,14 @@ public class DungeonGenerator
             }
             if (!anyFloor)
             {
-                tile.Glyph = ' ';   // deep interior — shows as background colour
+                tile.Glyph = ' ';
                 continue;
             }
 
-            // Boundary wall — pick box-drawing char by cardinal wall connectivity.
-            bool n = IsWallOrVoid(x, y - 1);
-            bool s = IsWallOrVoid(x, y + 1);
-            bool e = IsWallOrVoid(x + 1, y);
-            bool w = IsWallOrVoid(x - 1, y);
-
-            tile.Glyph = (n, s, e, w) switch
-            {
-                (true,  true,  true,  true ) => '┼',
-                (true,  true,  true,  false) => '├',
-                (true,  true,  false, true ) => '┤',
-                (false, true,  true,  true ) => '┬',
-                (true,  false, true,  true ) => '┴',
-                (true,  true,  false, false) => '│',
-                (false, false, true,  true ) => '─',
-                (true,  false, false, true ) => '┘',
-                (true,  false, true,  false) => '└',
-                (false, true,  false, true ) => '┐',
-                (false, true,  true,  false) => '┌',
-                _ => '#',   // pillar or single-arm stub
-            };
+            // Boundary wall → keep the '▄' half-block set by CreateWall().
+            // The lighter Background (top face) + darker Foreground (front face)
+            // creates a pseudo-3-D raised-block appearance.
+            // tile.Glyph is already '▄' — nothing to change.
         }
     }
 
