@@ -32,8 +32,10 @@ public class GameScreen : ScreenObject
     private int    _camX, _camY;
     private bool   _gameOverShown;
     private bool   _equipMode;
-    private int    _abilityDirState = 0; // 0 = none, 1-4 = waiting for direction
-    private double _glowTime        = 0; // accumulated seconds — drives the glow pulse
+    private int    _abilityDirState  = 0;   // 0 = none, 1-4 = waiting for direction
+    private double _glowTime         = 0;   // accumulated seconds — drives the glow pulse
+    private bool   _firstPersonMode  = false;
+    private double _fpAngle          = 0.0; // radians: 0=East(+X), π/2=South(+Y)
 
     private static readonly Color LabelClr  = new(140, 140, 140);
     private static readonly Color ValueClr  = new(200, 200, 100);
@@ -94,6 +96,10 @@ public class GameScreen : ScreenObject
     {
         var map = GameEngine.Instance.CurrentMap;
         if (map == null) return;
+
+        // ── First-person ray-cast mode takes over the whole map panel ──
+        if (_firstPersonMode) { RenderFirstPerson(map); return; }
+
         var em  = GameEngine.Instance.EntityManager;
 
         // Clear
@@ -407,8 +413,9 @@ public class GameScreen : ScreenObject
         }
 
         // Footer: mode hints
-        string hint = _equipMode    ? "Pick # to equip/unequip"
+        string hint = _equipMode          ? "Pick # to equip/unequip"
                     : _abilityDirState > 0 ? $"Dir for ability {_abilityDirState}"
+                    : _firstPersonMode     ? "Arrows=move  TAB=2D map"
                     : "E=equip .=wait g=pick";
         _sidebar.Print(1, TotalH - 2, hint[..Math.Min(hint.Length, SidebarW - 2)], DivClr);
     }
@@ -514,7 +521,28 @@ public class GameScreen : ScreenObject
             return true;
         }
 
-        // ── Normal movement ───────────────────────────────────────────
+        // ── First-person: Tab toggle + turn/move ─────────────────────
+        if (keyboard.IsKeyPressed(Keys.Tab)) { _firstPersonMode = !_firstPersonMode; return true; }
+
+        if (_firstPersonMode)
+        {
+            // Arrow keys / numpad turn camera; Up/Down strafe forward/backward
+            if (keyboard.IsKeyPressed(Keys.Left)  || keyboard.IsKeyPressed(Keys.NumPad4))
+            { _fpAngle -= 0.15; return true; }
+            if (keyboard.IsKeyPressed(Keys.Right) || keyboard.IsKeyPressed(Keys.NumPad6))
+            { _fpAngle += 0.15; return true; }
+            if (keyboard.IsKeyPressed(Keys.Up)    || keyboard.IsKeyPressed(Keys.NumPad8))
+            { var (dx, dy) = FpAngleToDir(_fpAngle);  GameEngine.Instance.ProcessPlayerTurn( dx,  dy); return true; }
+            if (keyboard.IsKeyPressed(Keys.Down)  || keyboard.IsKeyPressed(Keys.NumPad2))
+            { var (dx, dy) = FpAngleToDir(_fpAngle);  GameEngine.Instance.ProcessPlayerTurn(-dx, -dy); return true; }
+            // Diagonal strafe
+            if (keyboard.IsKeyPressed(Keys.NumPad7))
+            { var (dx, dy) = FpAngleToDir(_fpAngle - Math.PI * 0.5); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad9))
+            { var (dx, dy) = FpAngleToDir(_fpAngle + Math.PI * 0.5); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+        }
+
+        // ── Normal movement (top-down mode) ───────────────────────────
         if (keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.Up))    { GameEngine.Instance.ProcessPlayerTurn( 0, -1); return true; }
         if (keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.Down))  { GameEngine.Instance.ProcessPlayerTurn( 0,  1); return true; }
         if (keyboard.IsKeyPressed(Keys.NumPad4) || keyboard.IsKeyPressed(Keys.Left))  { GameEngine.Instance.ProcessPlayerTurn(-1,  0); return true; }
@@ -559,5 +587,274 @@ public class GameScreen : ScreenObject
             GameEngine.Instance.MessageLog.Add(
                 $"{ab.Name}: choose a direction (numpad/arrows).", ab.Color);
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // First-person Wolfenstein-style ray-cast renderer
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Snaps a continuous angle (radians) to the nearest of 8 grid directions
+    /// and returns the corresponding (dx, dy) step for use with ProcessPlayerTurn.
+    /// Coordinate convention: angle=0 → East (+X), angle=π/2 → South (+Y).
+    /// </summary>
+    private static (int dx, int dy) FpAngleToDir(double angle)
+    {
+        angle = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        int s = (int)Math.Round(angle / (Math.PI / 4)) % 8;
+        return s switch {
+            0 => ( 1,  0), // E
+            1 => ( 1,  1), // SE
+            2 => ( 0,  1), // S
+            3 => (-1,  1), // SW
+            4 => (-1,  0), // W
+            5 => (-1, -1), // NW
+            6 => ( 0, -1), // N
+            7 => ( 1, -1), // NE
+            _ => ( 1,  0),
+        };
+    }
+
+    private static string FpFacingLabel(double angle)
+    {
+        angle = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        int s = (int)Math.Round(angle / (Math.PI / 4)) % 8;
+        return s switch {
+            0 => "East",  1 => "SE",    2 => "South", 3 => "SW",
+            4 => "West",  5 => "NW",    6 => "North", 7 => "NE",
+            _ => "East",
+        };
+    }
+
+    /// <summary>
+    /// DDA (Digital Differential Analysis) ray-cast loop.
+    /// Casts one ray per screen column and returns the perpendicular wall distance,
+    /// which column face was hit (X-side vs Y-side), and the map cell that was hit.
+    /// </summary>
+    private static (double dist, bool ySide, int hitX, int hitY) CastRay(
+        GameMap map, double posX, double posY,
+        double rayDirX, double rayDirY)
+    {
+        int mapX = (int)posX, mapY = (int)posY;
+
+        double deltaDistX = Math.Abs(rayDirX) < 1e-10 ? 1e30 : Math.Abs(1.0 / rayDirX);
+        double deltaDistY = Math.Abs(rayDirY) < 1e-10 ? 1e30 : Math.Abs(1.0 / rayDirY);
+
+        int stepX, stepY;
+        double sideDistX, sideDistY;
+
+        if (rayDirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
+        else             { stepX =  1; sideDistX = (mapX + 1.0 - posX) * deltaDistX; }
+        if (rayDirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
+        else             { stepY =  1; sideDistY = (mapY + 1.0 - posY) * deltaDistY; }
+
+        bool hit = false, ySide = false;
+        int  steps = 80;
+        while (!hit && steps-- > 0)
+        {
+            if (sideDistX < sideDistY)
+            { sideDistX += deltaDistX; mapX += stepX; ySide = false; }
+            else
+            { sideDistY += deltaDistY; mapY += stepY; ySide = true;  }
+
+            var t = map.GetTile(mapX, mapY);
+            if (!t.IsWalkable || t.Type == TileType.Empty) hit = true;
+        }
+
+        if (!hit) return (1e6, false, mapX, mapY);
+
+        double dist = ySide
+            ? (mapY - posY + (1 - stepY) * 0.5) / rayDirY
+            : (mapX - posX + (1 - stepX) * 0.5) / rayDirX;
+
+        return (Math.Max(0.15, dist), ySide, mapX, mapY);
+    }
+
+    /// <summary>
+    /// Full first-person render: ceiling gradient, DDA wall slices, floor gradient,
+    /// crosshair, HUD bar, and an explored mini-map overlay.
+    /// </summary>
+    private void RenderFirstPerson(GameMap map)
+    {
+        var em     = GameEngine.Instance.EntityManager;
+        var player = GameEngine.Instance.PlayerEntity;
+        var pos    = em.GetComponent<PositionComponent>(player);
+        if (pos == null) return;
+
+        // ── Clear ──────────────────────────────────────────────────────────
+        for (int sy = 1; sy < MapH - 1; sy++)
+        for (int sx = 1; sx < MapW - 1; sx++)
+            _mapPanel.SetGlyph(sx, sy, ' ', Color.Black, Color.Black);
+
+        int viewW = MapW - 2;   // 57 usable columns
+        int viewH = MapH - 2;   // 35 usable rows
+        int halfH = viewH / 2;  // ~17 — horizon line
+
+        double posX  = pos.X + 0.5, posY = pos.Y + 0.5;
+        double dirX  =  Math.Cos(_fpAngle), dirY  = Math.Sin(_fpAngle);
+        double planX = -Math.Sin(_fpAngle) * 0.66;
+        double planY =  Math.Cos(_fpAngle) * 0.66;
+
+        // Wall tint per theme (RGB base at full brightness)
+        (int wr, int wg, int wb) = map.Theme switch {
+            MapTheme.Cave   => (108, 122, 140),
+            MapTheme.Crypt  => (120, 108, 155),
+            MapTheme.Mines  => (145, 122,  80),
+            MapTheme.Forest => ( 45, 118,  35),
+            _               => (158, 140, 105),
+        };
+
+        // ── Cast one ray per column ────────────────────────────────────────
+        for (int col = 0; col < viewW; col++)
+        {
+            int sx = col + 1;
+
+            // cameraX: -1 (left edge) → +1 (right edge)
+            double cameraX = 2.0 * col / Math.Max(1, viewW - 1) - 1.0;
+            double rayDX = dirX + planX * cameraX;
+            double rayDY = dirY + planY * cameraX;
+
+            var (perpDist, ySide, _, _) = CastRay(map, posX, posY, rayDX, rayDY);
+
+            // ── Wall slice height ────────────────────────────────────────
+            int lineH     = Math.Min(viewH, (int)(viewH / perpDist));
+            int drawStart = Math.Max(1,     halfH + 1 - lineH / 2);
+            int drawEnd   = Math.Min(viewH, halfH + 1 + lineH / 2);
+
+            // Wall glyph: coarser/lighter chars at distance
+            char wallCh = perpDist < 1.5 ? '█'
+                        : perpDist < 3.0 ? '▓'
+                        : perpDist < 6.0 ? '▒'
+                        :                  '░';
+
+            // Distance fade + Y-side (horizontal face) darkening
+            float fade  = (float)Math.Max(0.06, 1.0 - perpDist / 15.0);
+            float sideM = ySide ? 0.68f : 1.0f;
+            var wallClr = new Color(
+                (byte)(wr * fade * sideM),
+                (byte)(wg * fade * sideM),
+                (byte)(wb * fade * sideM));
+
+            // ── Ceiling (rows 1 … drawStart-1) ─────────────────────────
+            // Gradient: deep black at top → dim indigo just above wall
+            for (int sy = 1; sy < drawStart; sy++)
+            {
+                float t = drawStart > 2
+                    ? Math.Clamp((float)(sy - 1) / (float)(drawStart - 2), 0f, 1f) : 0f;
+                var cc = new Color(
+                    (byte)( 6 + (int)(12 * t)),
+                    (byte)( 6 + (int)(12 * t)),
+                    (byte)(28 + (int)(52 * t)));
+                _mapPanel.SetGlyph(sx, sy, ' ', cc, cc);
+            }
+
+            // ── Wall slice ─────────────────────────────────────────────
+            for (int sy = drawStart; sy <= drawEnd; sy++)
+                _mapPanel.SetGlyph(sx, sy, wallCh, wallClr, Color.Black);
+
+            // ── Floor (rows drawEnd+1 … viewH) ─────────────────────────
+            // Gradient: dim mossy green just below wall → pure black at bottom
+            for (int sy = drawEnd + 1; sy <= viewH; sy++)
+            {
+                float t = (viewH > drawEnd)
+                    ? Math.Clamp((float)(sy - drawEnd - 1) / (float)(viewH - drawEnd), 0f, 1f) : 0f;
+                float v = 1f - t;
+                var fc = new Color(
+                    (byte)(int)(18 * v),
+                    (byte)(int)(30 * v),
+                    (byte)(int)(12 * v));
+                _mapPanel.SetGlyph(sx, sy, ' ', fc, fc);
+            }
+        }
+
+        // ── Crosshair ──────────────────────────────────────────────────────
+        int crX = MapW / 2, crY = MapH / 2;
+        var crossClr = new Color(220, 220, 220);
+        _mapPanel.SetGlyph(crX - 1, crY, '─', crossClr, Color.Black);
+        _mapPanel.SetGlyph(crX,     crY, '+', crossClr,  Color.Black);
+        _mapPanel.SetGlyph(crX + 1, crY, '─', crossClr, Color.Black);
+        _mapPanel.SetGlyph(crX,   crY - 1, '│', crossClr, Color.Black);
+        _mapPanel.SetGlyph(crX,   crY + 1, '│', crossClr, Color.Black);
+
+        // ── HUD bar (row 1) ─────────────────────────────────────────────────
+        string facing = FpFacingLabel(_fpAngle);
+        string hud    = $" [{facing}]  Tab=overhead  Arrows=move+turn  1-4=ability";
+        _mapPanel.Print(1, 1, hud[..Math.Min(hud.Length, MapW - 3)],
+            new Color(200, 180, 100), Color.Black);
+
+        string floorLabel = $"Floor {GameEngine.Instance.CurrentFloor}";
+        _mapPanel.Print(MapW - floorLabel.Length - 1, 1, floorLabel,
+            new Color(100, 100, 160), Color.Black);
+
+        // ── Mini-map overlay (explored tiles, bottom-right corner) ─────────
+        DrawFpMiniMap(map, pos);
+    }
+
+    /// <summary>
+    /// 15×9 explored-tile mini-map rendered in the bottom-right corner of the
+    /// map panel.  The player is shown as a smiley (☻) glyph.
+    /// </summary>
+    private void DrawFpMiniMap(GameMap map, PositionComponent pos)
+    {
+        const int MmW = 15, MmH = 9;
+        // Place inside the map panel with a 1-cell gap from the right/bottom borders
+        int mxOff = MapW - MmW - 2;  // first column of the mini-map content (= 42)
+        int myOff = MapH - MmH - 2;  // first row of the mini-map content    (= 26)
+
+        int startWX = pos.X - MmW / 2;
+        int startWY = pos.Y - MmH / 2;
+
+        // Fill tiles
+        for (int my = 0; my < MmH; my++)
+        for (int mx = 0; mx < MmW; mx++)
+        {
+            int wx = startWX + mx, wy = startWY + my;
+            int sx = mxOff + mx,   sy = myOff + my;
+            if (sx < 1 || sx >= MapW - 1 || sy < 1 || sy >= MapH - 1) continue;
+
+            var tile = map.GetTile(wx, wy);
+
+            // Player marker (smiley ☻ using CP437 index 2)
+            if (wx == pos.X && wy == pos.Y)
+            {
+                _mapPanel.SetGlyph(sx, sy, '\x02', new Color(255, 255, 80), Color.Black);
+                continue;
+            }
+
+            if (!tile.IsExplored)
+            {
+                _mapPanel.SetGlyph(sx, sy, ' ', Color.Black, new Color(8, 8, 8));
+                continue;
+            }
+
+            (char ch, Color fg, Color bg) = tile.Type switch {
+                TileType.Floor                     => ('.', new Color(55, 75, 55), Color.Black),
+                TileType.Wall or TileType.Empty    => (' ', Color.Black, new Color(25, 25, 25)),
+                TileType.Door                      => ('+', new Color(200, 160, 80), Color.Black),
+                TileType.StairsDown                => ('>', new Color(200, 200, 255), Color.Black),
+                TileType.StairsUp                  => ('<', new Color(200, 200, 255), Color.Black),
+                TileType.Water                     => (' ', Color.Black, new Color(20, 55, 120)),
+                TileType.Chest                     => ('.', new Color(255, 200, 50), Color.Black),
+                _                                  => ('.', new Color(55, 75, 55), Color.Black),
+            };
+            _mapPanel.SetGlyph(sx, sy, ch, fg, bg);
+        }
+
+        // Border around the mini-map
+        var borderClr = new Color(50, 55, 75);
+        int bL = mxOff - 1, bR = mxOff + MmW;
+        int bT = myOff - 1, bB = myOff + MmH;
+
+        // Guard: only draw border cells that are inside the safe panel area
+        void SafeGlyph(int sx, int sy, char glyph)
+        {
+            if (sx >= 1 && sx < MapW - 1 && sy >= 1 && sy < MapH - 1)
+                _mapPanel.SetGlyph(sx, sy, glyph, borderClr, Color.Black);
+        }
+
+        SafeGlyph(bL, bT, '┌');  SafeGlyph(bR, bT, '┐');
+        SafeGlyph(bL, bB, '└');  SafeGlyph(bR, bB, '┘');
+        for (int mx = mxOff; mx < mxOff + MmW; mx++) { SafeGlyph(mx, bT, '─'); SafeGlyph(mx, bB, '─'); }
+        for (int my = myOff; my < myOff + MmH; my++) { SafeGlyph(bL, my, '│'); SafeGlyph(bR, my, '│'); }
     }
 }
