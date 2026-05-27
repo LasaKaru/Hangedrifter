@@ -1,0 +1,42 @@
+[
+  {
+    "Id": "meat",
+    "Name": "Meat",
+    "GlyphStr": "%",
+    "ColorHex": "#E06060",
+    "Category": "Food",
+    "Value": 5
+  },
+  {
+    "Id": "axe",
+    "Name": "Axe",
+    "GlyphStr": ")",
+    "ColorHex": "#C0C0C0",
+    "Category": "Weapon",
+    "Value": 10
+  },
+  {
+    "Id": "potion",
+    "Name": "Potion",
+    "GlyphStr": "!",
+    "ColorHex": "#8040C0",
+    "Category": "Consumable",
+    "Value": 8
+  },
+  {
+    "Id": "stone",
+    "Name": "Stone",
+    "GlyphStr": "*",
+    "ColorHex": "#A09080",
+    "Category": "Misc",
+    "Value": 1
+  },
+  {
+    "Id": "medicine",
+    "Name": "Medicine",
+    "GlyphStr": "+",
+    "ColorHex": "#40C040",
+    "Category": "Consumable",
+    "Value": 12
+  }
+]

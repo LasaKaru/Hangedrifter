@@ -1,0 +1,54 @@
+[
+  {
+    "Id": "skeleton",
+    "Name": "Skeleton",
+    "GlyphStr": "s",
+    "ColorHex": "#A0A0A0",
+    "MaxHp": 8,
+    "Defense": 1,
+    "Strength": 2,
+    "DamageDice": 1,
+    "DamageSides": 4,
+    "DamageBonus": 0,
+    "Behavior": "BasicMonster"
+  },
+  {
+    "Id": "goblin",
+    "Name": "Goblin",
+    "GlyphStr": "g",
+    "ColorHex": "#60C060",
+    "MaxHp": 5,
+    "Defense": 0,
+    "Strength": 1,
+    "DamageDice": 1,
+    "DamageSides": 4,
+    "DamageBonus": 0,
+    "Behavior": "BasicMonster"
+  },
+  {
+    "Id": "troll",
+    "Name": "Troll",
+    "GlyphStr": "T",
+    "ColorHex": "#C08040",
+    "MaxHp": 16,
+    "Defense": 2,
+    "Strength": 4,
+    "DamageDice": 1,
+    "DamageSides": 8,
+    "DamageBonus": 1,
+    "Behavior": "Aggressive"
+  },
+  {
+    "Id": "zombie",
+    "Name": "Zombie",
+    "GlyphStr": "z",
+    "ColorHex": "#80A060",
+    "MaxHp": 10,
+    "Defense": 1,
+    "Strength": 2,
+    "DamageDice": 1,
+    "DamageSides": 6,
+    "DamageBonus": 0,
+    "Behavior": "BasicMonster"
+  }
+]
