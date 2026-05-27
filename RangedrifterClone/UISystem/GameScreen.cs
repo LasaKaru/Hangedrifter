@@ -8,73 +8,67 @@ using RangedrifterClone.MapSystem;
 namespace RangedrifterClone.UISystem;
 
 /// <summary>
-/// Main gameplay screen. Partitioned into three SadConsole surfaces
-/// to match the Rangedrifter reference screenshots exactly:
-///   • Map panel      — camera-scrolled view of the 200×200 dungeon
-///   • Sidebar panel  — Status / HP / Inventory (right edge)
-///   • Message panel  — rolling log (bottom of map area)
+/// Main gameplay screen — three SadConsole panels matching Rangedrifter layout:
+///   Map panel (59×37)  — camera-scrolled 200×200 dungeon with FOV
+///   Sidebar  (21×50)   — class, status, HP, mana, equipment, inventory
+///   Msg log  (59×13)   — rolling combat/event history
+///
+/// Ability bar: keys 1-4 fire abilities; ability name + cooldown shown in sidebar.
+/// Equipment: key E opens equip prompt; inventory items with stats shown in colour.
 /// </summary>
 public class GameScreen : ScreenObject
 {
-    // ── Layout constants (80×50 total) ──────────────────────────────────────
-    private const int TotalW        = 80;
-    private const int TotalH        = 50;
-    private const int SidebarW      = 21;
-    private const int MapW          = TotalW - SidebarW;   // 59
-    private const int MsgH         = 13;
-    private const int MapH          = TotalH - MsgH;       // 37
+    private const int TotalW   = 80;
+    private const int TotalH   = 50;
+    private const int SidebarW = 21;
+    private const int MapW     = TotalW - SidebarW;  // 59
+    private const int MsgH     = 13;
+    private const int MapH     = TotalH - MsgH;      // 37
 
     private readonly ScreenSurface _mapPanel;
     private readonly ScreenSurface _sidebar;
     private readonly ScreenSurface _msgPanel;
 
-    // Camera top-left (map coordinates)
-    private int _camX, _camY;
+    private int  _camX, _camY;
     private bool _gameOverShown;
+    private bool _equipMode;
+    private int  _abilityDirState = 0; // 0 = none, 1-4 = waiting for direction
 
-    // Colours used repeatedly in sidebar
-    private static readonly Color LabelColor  = new(140, 140, 140);
-    private static readonly Color ValueColor  = new(200, 200, 100);
-    private static readonly Color DivColor    = new( 60,  60,  60);
-    private static readonly Color HpLabelClr  = new(180,  80,  80);
+    private static readonly Color LabelClr  = new(140, 140, 140);
+    private static readonly Color ValueClr  = new(200, 200, 100);
+    private static readonly Color DivClr    = new( 60,  60,  60);
+    private static readonly Color HpLblClr  = new(180,  80,  80);
+    private static readonly Color ManaClr   = new( 80, 140, 220);
 
     public GameScreen()
     {
-        _mapPanel = new ScreenSurface(MapW,     MapH)     { Position = new Point(0,    0) };
-        _sidebar  = new ScreenSurface(SidebarW, TotalH)   { Position = new Point(MapW, 0) };
-        _msgPanel = new ScreenSurface(MapW,     MsgH)     { Position = new Point(0, MapH) };
-
+        _mapPanel = new ScreenSurface(MapW,     MapH)   { Position = new Point(0,    0) };
+        _sidebar  = new ScreenSurface(SidebarW, TotalH) { Position = new Point(MapW, 0) };
+        _msgPanel = new ScreenSurface(MapW,     MsgH)   { Position = new Point(0, MapH) };
         Children.Add(_mapPanel);
         Children.Add(_sidebar);
         Children.Add(_msgPanel);
-
         DrawBorders();
-
-        // Subscribe to message log — event-aggregator pattern (no tight coupling)
         GameEngine.Instance.MessageLog.MessageAdded += (_, _) => RefreshMessages();
     }
 
-    // ── Borders ─────────────────────────────────────────────────────────────
+    // ── Borders ──────────────────────────────────────────────────────────
     private void DrawBorders()
     {
-        var borderGlyph = new ColoredGlyph(new Color(60, 60, 60), Color.Black);
-
-        _mapPanel.DrawBox(new Rectangle(0, 0, MapW,     MapH),
-            ShapeParameters.CreateStyledBox(ICellSurface.ConnectedLineThin, borderGlyph));
-
-        _sidebar.DrawBox(new Rectangle(0, 0, SidebarW, TotalH),
-            ShapeParameters.CreateStyledBox(ICellSurface.ConnectedLineThin, borderGlyph));
-
-        _msgPanel.DrawBox(new Rectangle(0, 0, MapW, MsgH),
-            ShapeParameters.CreateStyledBox(ICellSurface.ConnectedLineThin, borderGlyph));
+        var b = new ColoredGlyph(DivClr, Color.Black);
+        _mapPanel.DrawBox(new Rectangle(0, 0, MapW,     MapH),   ShapeParameters.CreateStyledBox(ICellSurface.ConnectedLineThin, b));
+        _sidebar .DrawBox(new Rectangle(0, 0, SidebarW, TotalH), ShapeParameters.CreateStyledBox(ICellSurface.ConnectedLineThin, b));
+        _msgPanel.DrawBox(new Rectangle(0, 0, MapW,     MsgH),   ShapeParameters.CreateStyledBox(ICellSurface.ConnectedLineThin, b));
     }
 
-    // ── Update (called every frame by SadConsole game loop) ─────────────────
+    public void ResetGameOver() { _gameOverShown = false; DrawBorders(); }
+
+    // ── Update (every frame) ──────────────────────────────────────────────
     public override void Update(TimeSpan delta)
     {
         base.Update(delta);
-        if (GameEngine.Instance.State == GameState.Playing ||
-            GameEngine.Instance.State == GameState.GameOver)
+        var st = GameEngine.Instance.State;
+        if (st == GameState.Playing || st == GameState.GameOver)
         {
             UpdateCamera();
             RenderMap();
@@ -82,31 +76,25 @@ public class GameScreen : ScreenObject
         }
     }
 
-    // ── Camera ───────────────────────────────────────────────────────────────
+    // ── Camera ────────────────────────────────────────────────────────────
     private void UpdateCamera()
     {
         var pos = GameEngine.Instance.EntityManager
             .GetComponent<PositionComponent>(GameEngine.Instance.PlayerEntity);
-        if (pos == null) return;
-
         var map = GameEngine.Instance.CurrentMap;
-        if (map == null) return;
-
-        int innerW = MapW - 2;   // inside border
-        int innerH = MapH - 2;
-
-        _camX = Math.Clamp(pos.X - innerW / 2, 0, Math.Max(0, map.Width  - innerW));
-        _camY = Math.Clamp(pos.Y - innerH / 2, 0, Math.Max(0, map.Height - innerH));
+        if (pos == null || map == null) return;
+        _camX = Math.Clamp(pos.X - (MapW - 2) / 2, 0, Math.Max(0, map.Width  - MapW + 2));
+        _camY = Math.Clamp(pos.Y - (MapH - 2) / 2, 0, Math.Max(0, map.Height - MapH + 2));
     }
 
-    // ── Map rendering ────────────────────────────────────────────────────────
+    // ── Map panel ─────────────────────────────────────────────────────────
     private void RenderMap()
     {
         var map = GameEngine.Instance.CurrentMap;
         if (map == null) return;
-        var em = GameEngine.Instance.EntityManager;
+        var em  = GameEngine.Instance.EntityManager;
 
-        // Clear interior
+        // Clear
         for (int sy = 1; sy < MapH - 1; sy++)
         for (int sx = 1; sx < MapW - 1; sx++)
             _mapPanel.SetGlyph(sx, sy, ' ', Color.Black, Color.Black);
@@ -115,39 +103,41 @@ public class GameScreen : ScreenObject
         for (int sy = 1; sy < MapH - 1; sy++)
         for (int sx = 1; sx < MapW - 1; sx++)
         {
-            int mx = _camX + sx - 1;
-            int my = _camY + sy - 1;
-            var tile = map.GetTile(mx, my);
-
+            var tile = map.GetTile(_camX + sx - 1, _camY + sy - 1);
             if (tile.IsVisible)
-                _mapPanel.SetGlyph(sx, sy, tile.Glyph,
-                    tile.ForegroundVisible, tile.Background);
+                _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundVisible, tile.Background);
             else if (tile.IsExplored)
-                _mapPanel.SetGlyph(sx, sy, tile.Glyph,
-                    tile.ForegroundExplored, tile.Background);
+                _mapPanel.SetGlyph(sx, sy, tile.Glyph, tile.ForegroundExplored, tile.Background);
         }
 
-        // Entities — lowest layer drawn first, highest on top
-        var entities = em.GetEntitiesWith<RenderComponent, PositionComponent>()
-            .Select(e => (e,
-                Render: em.GetComponent<RenderComponent>(e)!,
-                Pos:    em.GetComponent<PositionComponent>(e)!))
-            .OrderBy(t => t.Render.RenderLayer)
-            .ToList();
-
-        foreach (var (_, render, pos) in entities)
+        // Entities (sorted by layer — lowest drawn first)
+        foreach (var (_, render, pos) in em
+            .GetEntitiesWith<RenderComponent, PositionComponent>()
+            .Select(e => (e, em.GetComponent<RenderComponent>(e)!, em.GetComponent<PositionComponent>(e)!))
+            .OrderBy(t => t.Item2.RenderLayer))
         {
+            if (!render.IsVisible) continue;
             var tile = map.GetTile(pos.X, pos.Y);
+
+            // Traps: only show if revealed
+            bool isTrap = em.GetComponent<FeatureComponent>(
+                em.GetEntitiesWith<FeatureComponent, PositionComponent>()
+                  .FirstOrDefault(e => { var p = em.GetComponent<PositionComponent>(e)!; return p.X == pos.X && p.Y == pos.Y; }))
+                ?.Type == FeatureType.Trap;
+
             if (!tile.IsVisible) continue;
 
-            int sx = pos.X - _camX + 1;
-            int sy = pos.Y - _camY + 1;
+            int sx = pos.X - _camX + 1, sy = pos.Y - _camY + 1;
             if (sx >= 1 && sx < MapW - 1 && sy >= 1 && sy < MapH - 1)
                 _mapPanel.SetGlyph(sx, sy, render.Glyph, render.Foreground, Color.Black);
         }
 
-        // Terrain / feature labels (bottom-right corner of map panel, like screenshots)
+        // Floor / terrain labels (bottom-right corner)
         RenderTerrainLabels(map);
+
+        // Floor number
+        string floorLabel = $"Floor {GameEngine.Instance.CurrentFloor}";
+        _mapPanel.Print(MapW - floorLabel.Length - 1, 1, floorLabel, new Color(100, 100, 160));
     }
 
     private void RenderTerrainLabels(GameMap map)
@@ -155,211 +145,331 @@ public class GameScreen : ScreenObject
         var pos = GameEngine.Instance.EntityManager
             .GetComponent<PositionComponent>(GameEngine.Instance.PlayerEntity);
         if (pos == null) return;
-
         var nearby = new List<string>();
         for (int dy = -3; dy <= 3 && nearby.Count < 2; dy++)
         for (int dx = -3; dx <= 3 && nearby.Count < 2; dx++)
         {
             var t = map.GetTile(pos.X + dx, pos.Y + dy);
-            if ((t.Type == TileType.Rock || t.Type == TileType.Bush)
-                && t.IsVisible && !nearby.Contains(t.Name))
-                nearby.Add(t.Name);
+            if (t.IsVisible && t.Type is TileType.Rock or TileType.Bush
+                or TileType.StairsDown or TileType.StairsUp or TileType.Chest or TileType.Trap
+                or TileType.Door or TileType.Water)
+                if (!nearby.Contains(t.Name)) nearby.Add(t.Name);
         }
-
-        int labelX = MapW - 9;
-        int labelY = MapH - 2;
+        int ly = MapH - 2;
         foreach (var name in nearby)
-            _mapPanel.Print(labelX, labelY--, name, new Color(160, 160, 100));
+            _mapPanel.Print(MapW - name.Length - 2, ly--, name, new Color(160, 160, 100));
     }
 
-    // ── Sidebar rendering ────────────────────────────────────────────────────
+    // ── Sidebar ───────────────────────────────────────────────────────────
     private void RenderSidebar()
     {
         var em     = GameEngine.Instance.EntityManager;
         var player = GameEngine.Instance.PlayerEntity;
 
-        // Clear interior
         for (int cy = 1; cy < TotalH - 1; cy++)
         for (int cx = 1; cx < SidebarW - 1; cx++)
             _sidebar.SetGlyph(cx, cy, ' ', Color.Black, Color.Black);
 
         var fighter = em.GetComponent<FighterComponent>(player);
         var inv     = em.GetComponent<InventoryComponent>(player);
+        var mana    = em.GetComponent<ManaComponent>(player);
         var status  = em.GetComponent<StatusComponent>(player);
         var exp     = em.GetComponent<ExperienceComponent>(player);
+        var cls     = em.GetComponent<ClassComponent>(player);
+        var equip   = em.GetComponent<EquipmentSlotComponent>(player);
+        var abils   = em.GetComponent<AbilityComponent>(player);
+        var fxComp  = em.GetComponent<StatusEffectComponent>(player);
 
         int y = 1;
-        var div = new string('─', SidebarW - 2);
+        string div = new string('─', SidebarW - 2);
 
-        // ── Status block ──────────────────────────────────────────
+        // Class header
+        if (cls != null)
+        {
+            var clsClr = cls.Class switch
+            {
+                PlayerClass.Warrior => new Color(220, 160, 60),
+                PlayerClass.Rogue   => new Color(180, 100, 180),
+                PlayerClass.Mage    => new Color(80, 160, 220),
+                _                   => new Color(180, 180, 180)
+            };
+            _sidebar.Print(1, y++, cls.ClassName, clsClr, Color.Black);
+        }
+        _sidebar.Print(1, y++, div, DivClr);
+
+        // ── Stats block ──────────────────────────────────────────────
         _sidebar.Print(1, y++, "Status", new Color(180, 180, 180));
-        _sidebar.Print(1, y++, div, DivColor);
 
         if (fighter != null)
         {
-            PrintStat("Damage",   fighter.DamageString, ref y);
-            PrintStat("Armor",    fighter.Defense.ToString(), ref y);
-            PrintStat("Strength", fighter.Strength.ToString(), ref y);
-            PrintStat("Defense",  fighter.Defense.ToString(), ref y);
+            Stat("Damage",   fighter.DamageString,            ref y);
+            Stat("Armor",    fighter.EffectiveDefense.ToString(), ref y);
+            Stat("Strength", fighter.Strength.ToString(),     ref y);
         }
         if (exp != null)
         {
-            PrintStat("Vitality", "1", ref y);
-            _sidebar.Print(1, y++, "Experience", LabelColor);
-            _sidebar.Print(3, y++, $"{exp.Experience}/{exp.NextLevelExp}",
-                new Color(100, 180, 100));
+            Stat("Level",    exp.Level.ToString(),            ref y);
+            Stat("XP",       $"{exp.Experience}/{exp.NextLevelExp}", ref y);
         }
         if (status != null)
-            PrintStat("Turn", status.Turn.ToString(), ref y);
+            Stat("Turn",     status.Turn.ToString(),          ref y);
 
         y++;
-        _sidebar.Print(1, y++, div, DivColor);
+        _sidebar.Print(1, y++, div, DivClr);
 
-        // ── HP block ──────────────────────────────────────────────
+        // ── HP + Mana bars ───────────────────────────────────────────
         if (fighter != null)
         {
             var hpClr = fighter.Hp < fighter.MaxHp / 3 ? Color.Red
                       : fighter.Hp < fighter.MaxHp * 2 / 3 ? Color.Yellow
                       : Color.LightGreen;
-
-            _sidebar.Print(1, y, "hp",
-                HpLabelClr, Color.Black);
-            _sidebar.Print(4, y++, $"{fighter.Hp}/{fighter.MaxHp}", hpClr, Color.Black);
-
-            // HP bar
-            int barW   = SidebarW - 3;
-            int filled = (int)Math.Round((double)fighter.Hp / fighter.MaxHp * barW);
-            for (int i = 0; i < barW; i++)
-                _sidebar.SetGlyph(1 + i, y, '█',
-                    i < filled ? hpClr : new Color(50, 20, 20), Color.Black);
+            _sidebar.Print(1, y, "hp", HpLblClr);
+            _sidebar.Print(4, y++, $"{fighter.Hp}/{fighter.MaxHpTotal}", hpClr);
+            int bw = SidebarW - 3;
+            int filled = (int)Math.Round((double)Math.Max(0, fighter.Hp) / Math.Max(1, fighter.MaxHpTotal) * bw);
+            for (int i = 0; i < bw; i++)
+                _sidebar.SetGlyph(1 + i, y, '█', i < filled ? hpClr : new Color(50, 20, 20));
+            y += 2;
+        }
+        if (mana != null)
+        {
+            _sidebar.Print(1, y, "mp", ManaClr);
+            _sidebar.Print(4, y++, $"{mana.Mana}/{mana.MaxMana}", ManaClr);
+            int bw = SidebarW - 3;
+            int filled = (int)Math.Round((double)mana.Mana / Math.Max(1, mana.MaxMana) * bw);
+            for (int i = 0; i < bw; i++)
+                _sidebar.SetGlyph(1 + i, y, '█', i < filled ? ManaClr : new Color(20, 20, 50));
             y += 2;
         }
 
-        // Weapon quality (like "Dull edge" in screenshot)
-        if (status != null)
-            _sidebar.Print(1, y++, status.WeaponQuality, new Color(110, 110, 110));
+        // ── Status effects ───────────────────────────────────────────
+        if (fxComp != null && fxComp.Effects.Count > 0)
+        {
+            foreach (var fx in fxComp.Effects.Take(3))
+            {
+                var fxClr = fx.Type switch
+                {
+                    EffectType.Poisoned or EffectType.Poisoning => new Color(100, 200, 80),
+                    EffectType.Burning   => new Color(255, 140, 0),
+                    EffectType.Frozen    => new Color(100, 200, 240),
+                    EffectType.Stunned   => new Color(180, 180, 180),
+                    EffectType.Blessed   => new Color(255, 220, 80),
+                    EffectType.Cursed    => new Color(160, 80, 200),
+                    EffectType.Regenerating => Color.LightGreen,
+                    _                    => new Color(160, 160, 160)
+                };
+                _sidebar.Print(1, y++, $"~ {fx.Type} ({fx.Duration}t)", fxClr);
+            }
+            y++;
+        }
 
-        y++;
-        _sidebar.Print(1, y++, div, DivColor);
+        // ── Equipment ────────────────────────────────────────────────
+        _sidebar.Print(1, y++, div, DivClr);
+        _sidebar.Print(1, y++, "Equipment", new Color(180, 180, 100));
+        if (equip != null)
+        {
+            PrintEquipSlot("W:", equip.Weapon,  ref y);
+            PrintEquipSlot("A:", equip.Armor,   ref y);
+            PrintEquipSlot("S:", equip.Shield,  ref y);
+            PrintEquipSlot("R:", equip.Ring,    ref y);
+        }
 
-        // ── Inventory / Bag block ─────────────────────────────────
+        // ── Abilities ────────────────────────────────────────────────
+        _sidebar.Print(1, y++, div, DivClr);
+        _sidebar.Print(1, y++, "Abilities", new Color(180, 100, 180));
+        if (abils != null)
+        {
+            for (int i = 0; i < abils.Abilities.Count && y < TotalH - 6; i++)
+            {
+                var ab = abils.Abilities[i];
+                bool rdy = ab.IsReady;
+                var abClr = rdy ? ab.Color : new Color(80, 80, 80);
+                string cdStr = rdy ? "  " : $"{ab.CurrentCooldown}t";
+                string prefix = $"[{i + 1}]";
+                string name = ab.Name.Length > 9 ? ab.Name[..9] : ab.Name;
+                _sidebar.Print(1, y, prefix, new Color(120, 120, 120));
+                _sidebar.Print(4, y, name, abClr);
+                _sidebar.Print(SidebarW - 4, y++, cdStr, rdy ? DivClr : Color.Red);
+            }
+        }
+
+        // ── Inventory ────────────────────────────────────────────────
+        _sidebar.Print(1, y++, div, DivClr);
         _sidebar.Print(1, y++, "Bag", new Color(180, 180, 180));
-
         if (inv != null)
         {
-            for (int i = 0; i < Math.Min(inv.Items.Count, 8); i++)
+            for (int i = 0; i < Math.Min(inv.Items.Count, TotalH - y - 2); i++)
             {
-                var item    = inv.Items[i];
-                bool equip  = i == inv.EquippedWeaponIndex || i == inv.EquippedArmorIndex;
-                var  pre    = equip ? ">" : " ";
-                var  itemFg = item.Category switch
+                var item   = inv.Items[i];
+                var itemFg = item.Category switch
                 {
                     "Weapon"     => new Color(200, 200, 100),
                     "Food"       => new Color(200, 120,  80),
                     "Consumable" => new Color(160, 100, 200),
+                    "Armor" or "Shield" or "Ring" or "Amulet" => new Color(100, 180, 200),
                     _            => new Color(180, 180, 180)
                 };
-
-                string label = $"{pre} {item.Glyph} {item.Name}";
+                string label = $"{item.Glyph} {item.Name}";
                 if (label.Length > SidebarW - 5) label = label[..(SidebarW - 5)];
-                _sidebar.Print(1, y, label, itemFg, Color.Black);
-
+                _sidebar.Print(1, y, label, itemFg);
                 if (item.Count > 1)
-                    _sidebar.Print(SidebarW - 5, y, $"x{item.Count}",
-                        new Color(120, 120, 120), Color.Black);
+                    _sidebar.Print(SidebarW - 4, y, $"x{item.Count}", DivClr);
                 y++;
             }
         }
 
-        // ── Status effects + level ────────────────────────────────
-        if (status?.IsHungry == true)
-            _sidebar.Print(1, TotalH - 5, "Hungry", new Color(200, 150, 50));
-        if (exp != null)
-            _sidebar.Print(1, TotalH - 4, $"lv {exp.Level}", LabelColor);
-
-        // ── Controls hint ─────────────────────────────────────────
-        _sidebar.Print(1, TotalH - 3, "g=pickup .=wait", DivColor);
-        _sidebar.Print(1, TotalH - 2, "numpad/arrows=move", DivColor);
+        // Footer: mode hints
+        string hint = _equipMode    ? "Pick # to equip/unequip"
+                    : _abilityDirState > 0 ? $"Dir for ability {_abilityDirState}"
+                    : "E=equip .=wait g=pick";
+        _sidebar.Print(1, TotalH - 2, hint[..Math.Min(hint.Length, SidebarW - 2)], DivClr);
     }
 
-    private void PrintStat(string label, string value, ref int y)
+    private void Stat(string label, string value, ref int y)
     {
-        _sidebar.Print(1,  y, label, LabelColor, Color.Black);
-        _sidebar.Print(11, y, value, ValueColor, Color.Black);
+        _sidebar.Print(1,  y, label, LabelClr);
+        _sidebar.Print(11, y, value, ValueClr);
         y++;
     }
 
-    // ── Message log ──────────────────────────────────────────────────────────
+    private void PrintEquipSlot(string prefix, EquipmentEntry? entry, ref int y)
+    {
+        _sidebar.Print(1, y, prefix, DivClr);
+        if (entry != null)
+        {
+            string name = entry.Name.Length > SidebarW - 5 ? entry.Name[..(SidebarW - 5)] : entry.Name;
+            _sidebar.Print(3, y, name, entry.Color);
+        }
+        else
+            _sidebar.Print(3, y, "—", DivClr);
+        y++;
+    }
+
+    // ── Messages ─────────────────────────────────────────────────────────
     private void RefreshMessages()
     {
         var msgs    = GameEngine.Instance.MessageLog.Messages;
         int visible = MsgH - 2;
 
-        for (int y = 1; y < MsgH - 1; y++)
-        for (int x = 1; x < MapW  - 1; x++)
-            _msgPanel.SetGlyph(x, y, ' ', Color.Black, Color.Black);
+        for (int my = 1; my < MsgH - 1; my++)
+        for (int mx = 1; mx < MapW  - 1; mx++)
+            _msgPanel.SetGlyph(mx, my, ' ', Color.Black, Color.Black);
 
         var toShow = msgs.Skip(Math.Max(0, msgs.Count - visible)).ToList();
         for (int i = 0; i < toShow.Count; i++)
         {
             string text = toShow[i].Text;
             if (text.Length > MapW - 3) text = text[..(MapW - 3)];
-            _msgPanel.Print(1, 1 + i, text, toShow[i].Color, Color.Black);
+            _msgPanel.Print(1, 1 + i, text, toShow[i].Color);
         }
     }
 
-    // ── Game Over overlay ────────────────────────────────────────────────────
+    // ── Game Over overlay ─────────────────────────────────────────────────
     public void ShowGameOver()
     {
         if (_gameOverShown) return;
         _gameOverShown = true;
-
-        int cx = MapW / 2 - 7;
-        int cy = MapH / 2;
-        _mapPanel.Print(cx,     cy,     "╔═══════════════╗", Color.Red,    Color.Black);
-        _mapPanel.Print(cx,     cy + 1, "║  YOU HAVE DIED ║", Color.Red,    Color.Black);
-        _mapPanel.Print(cx,     cy + 2, "╚═══════════════╝", Color.Red,    Color.Black);
-        _mapPanel.Print(cx - 1, cy + 4, "Press R to restart", Color.Yellow, Color.Black);
+        int cx = MapW / 2 - 9, cy = MapH / 2;
+        _mapPanel.Print(cx,     cy,     "╔══════════════════╗", Color.Red);
+        _mapPanel.Print(cx,     cy + 1, "║   YOU HAVE DIED  ║", Color.Red);
+        _mapPanel.Print(cx,     cy + 2, "╚══════════════════╝", Color.Red);
+        _mapPanel.Print(cx - 1, cy + 4, "Press R to restart", Color.Yellow);
     }
 
-    // ── Keyboard ─────────────────────────────────────────────────────────────
+    // ── Keyboard ─────────────────────────────────────────────────────────
     public override bool ProcessKeyboard(Keyboard keyboard)
     {
         if (_gameOverShown)
         {
             if (keyboard.IsKeyPressed(Keys.R))
             {
-                _gameOverShown = false;
+                _gameOverShown  = false;
+                _equipMode      = false;
+                _abilityDirState = 0;
                 DrawBorders();
-                GameEngine.Instance.StartNewGame();
+                GameEngine.Instance.State = GameState.CharacterCreation;
             }
             return true;
         }
 
-        // 8-directional movement (numpad + arrows)
-        if (keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.Up))
-            { GameEngine.Instance.ProcessPlayerTurn(0, -1); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.Down))
-            { GameEngine.Instance.ProcessPlayerTurn(0,  1); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad4) || keyboard.IsKeyPressed(Keys.Left))
-            { GameEngine.Instance.ProcessPlayerTurn(-1, 0); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad6) || keyboard.IsKeyPressed(Keys.Right))
-            { GameEngine.Instance.ProcessPlayerTurn( 1, 0); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad7))
-            { GameEngine.Instance.ProcessPlayerTurn(-1, -1); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad9))
-            { GameEngine.Instance.ProcessPlayerTurn( 1, -1); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad1))
-            { GameEngine.Instance.ProcessPlayerTurn(-1,  1); return true; }
-        if (keyboard.IsKeyPressed(Keys.NumPad3))
-            { GameEngine.Instance.ProcessPlayerTurn( 1,  1); return true; }
+        // ── Equip mode ────────────────────────────────────────────────
+        if (_equipMode)
+        {
+            for (int i = 0; i <= 9; i++)
+            {
+                if (keyboard.IsKeyPressed((Keys)(Keys.D0 + i)))
+                {
+                    GameEngine.Instance.TryEquipItem(i - 1);
+                    _equipMode = false;
+                    return true;
+                }
+            }
+            if (keyboard.IsKeyPressed(Keys.Escape) || keyboard.IsKeyPressed(Keys.E))
+                _equipMode = false;
+            return true;
+        }
 
-        // Actions
+        // ── Waiting for ability direction ─────────────────────────────
+        if (_abilityDirState > 0)
+        {
+            int idx = _abilityDirState - 1;
+            _abilityDirState = 0;
+            if      (keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.Up))    GameEngine.Instance.UseAbility(idx,  0, -1);
+            else if (keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.Down))  GameEngine.Instance.UseAbility(idx,  0,  1);
+            else if (keyboard.IsKeyPressed(Keys.NumPad4) || keyboard.IsKeyPressed(Keys.Left))  GameEngine.Instance.UseAbility(idx, -1,  0);
+            else if (keyboard.IsKeyPressed(Keys.NumPad6) || keyboard.IsKeyPressed(Keys.Right)) GameEngine.Instance.UseAbility(idx,  1,  0);
+            else if (keyboard.IsKeyPressed(Keys.NumPad7)) GameEngine.Instance.UseAbility(idx, -1, -1);
+            else if (keyboard.IsKeyPressed(Keys.NumPad9)) GameEngine.Instance.UseAbility(idx,  1, -1);
+            else if (keyboard.IsKeyPressed(Keys.NumPad1)) GameEngine.Instance.UseAbility(idx, -1,  1);
+            else if (keyboard.IsKeyPressed(Keys.NumPad3)) GameEngine.Instance.UseAbility(idx,  1,  1);
+            else GameEngine.Instance.UseAbility(idx); // AoE/Heal: no direction needed
+            return true;
+        }
+
+        // ── Normal movement ───────────────────────────────────────────
+        if (keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.Up))    { GameEngine.Instance.ProcessPlayerTurn( 0, -1); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.Down))  { GameEngine.Instance.ProcessPlayerTurn( 0,  1); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad4) || keyboard.IsKeyPressed(Keys.Left))  { GameEngine.Instance.ProcessPlayerTurn(-1,  0); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad6) || keyboard.IsKeyPressed(Keys.Right)) { GameEngine.Instance.ProcessPlayerTurn( 1,  0); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad7))                                      { GameEngine.Instance.ProcessPlayerTurn(-1, -1); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad9))                                      { GameEngine.Instance.ProcessPlayerTurn( 1, -1); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad1))                                      { GameEngine.Instance.ProcessPlayerTurn(-1,  1); return true; }
+        if (keyboard.IsKeyPressed(Keys.NumPad3))                                      { GameEngine.Instance.ProcessPlayerTurn( 1,  1); return true; }
+
+        // ── Abilities 1-4 ─────────────────────────────────────────────
+        if (keyboard.IsKeyPressed(Keys.D1)) { QueueAbility(1); return true; }
+        if (keyboard.IsKeyPressed(Keys.D2)) { QueueAbility(2); return true; }
+        if (keyboard.IsKeyPressed(Keys.D3)) { QueueAbility(3); return true; }
+        if (keyboard.IsKeyPressed(Keys.D4)) { QueueAbility(4); return true; }
+
+        // ── Other actions ─────────────────────────────────────────────
         if (keyboard.IsKeyPressed(Keys.G) || keyboard.IsKeyPressed(Keys.OemComma))
-            { GameEngine.Instance.ProcessAction(PlayerAction.PickUp); return true; }
+        { GameEngine.Instance.ProcessAction(PlayerAction.PickUp);  return true; }
         if (keyboard.IsKeyPressed(Keys.OemPeriod) || keyboard.IsKeyPressed(Keys.NumPad5))
-            { GameEngine.Instance.ProcessAction(PlayerAction.Wait); return true; }
+        { GameEngine.Instance.ProcessAction(PlayerAction.Wait);    return true; }
+        if (keyboard.IsKeyPressed(Keys.U))
+        { GameEngine.Instance.ProcessAction(PlayerAction.UseItem); return true; }
+        if (keyboard.IsKeyPressed(Keys.E))
+        { _equipMode = true; return true; }
 
         return base.ProcessKeyboard(keyboard);
+    }
+
+    private void QueueAbility(int number)
+    {
+        var em   = GameEngine.Instance.EntityManager;
+        var abil = em.GetComponent<AbilityComponent>(GameEngine.Instance.PlayerEntity);
+        if (abil == null || number > abil.Abilities.Count) return;
+
+        var ab = abil.Abilities[number - 1];
+        // AoE and Heal don't need a direction; everything else does
+        if (ab.Type is AbilityType.AoEDamage or AbilityType.Heal or AbilityType.Buff)
+            GameEngine.Instance.UseAbility(number - 1);
+        else
+        {
+            _abilityDirState = number;
+            GameEngine.Instance.MessageLog.Add(
+                $"{ab.Name}: choose a direction (numpad/arrows).", ab.Color);
+        }
     }
 }

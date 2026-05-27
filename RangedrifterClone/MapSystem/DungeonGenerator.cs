@@ -1,10 +1,15 @@
 namespace RangedrifterClone.MapSystem;
 
+/// <summary>
+/// BSP dungeon generator with themes, special rooms (treasury / shrine /
+/// boss chamber), doors, traps, chests, and multi-floor scaling.
+/// </summary>
 public class DungeonGenerator
 {
-    private readonly int _width;
-    private readonly int _height;
+    private readonly int    _width, _height;
     private readonly Random _rng;
+    private readonly int    _floor;
+    private readonly MapTheme _theme;
     private GameMap _map = null!;
 
     private class BspNode
@@ -12,31 +17,53 @@ public class DungeonGenerator
         public int X, Y, W, H;
         public BspNode? Left, Right;
         public RoomRect? Room;
-        public BspNode(int x, int y, int w, int h) { X = x; Y = y; W = w; H = h; }
+        public RoomTag   Tag = RoomTag.Normal;
+        public BspNode(int x, int y, int w, int h) { X=x; Y=y; W=w; H=h; }
     }
-
     public record struct RoomRect(int X, int Y, int Width, int Height);
+    private enum RoomTag { Normal, Start, Boss, Treasury, Shrine }
 
-    public DungeonGenerator(int width, int height, int? seed = null)
+    public DungeonGenerator(int width, int height, int floor = 1,
+        MapTheme theme = MapTheme.Dungeon, int? seed = null)
     {
-        _width = width;
-        _height = height;
+        _width  = width;  _height = height;
+        _floor  = floor;  _theme  = theme;
         _rng = seed.HasValue ? new Random(seed.Value) : new Random();
     }
 
+    // ── Theme picker (called by GameEngine based on floor) ──────────────
+    public static MapTheme ThemeForFloor(int floor) => floor switch
+    {
+        1       => MapTheme.Dungeon,
+        2 or 3  => MapTheme.Cave,
+        4 or 5  => MapTheme.Mines,
+        6 or 7  => MapTheme.Crypt,
+        _       => MapTheme.Forest
+    };
+
     public GameMap Generate()
     {
-        _map = new GameMap(_width, _height);
+        _map = new GameMap(_width, _height, _floor, _theme);
         var root = new BspNode(1, 1, _width - 2, _height - 2);
         SplitNode(root, 0);
         CreateRooms(root);
         ConnectRooms(root);
         PlaceWalls();
-        PlaceSpawnPoints(root);
+
+        var rooms = new List<(BspNode node, RoomRect rect)>();
+        CollectRooms(root, rooms);
+        if (rooms.Count == 0) return _map;
+
+        TagRooms(rooms);
+        PlaceStairs(rooms);
+        PlaceSpawnPoints(rooms);
+        PlaceDoors();
+        PlaceChestsAndTraps(rooms);
         AddScenery();
         return _map;
     }
 
+    // ── BSP splitting ────────────────────────────────────────────────────
     private void SplitNode(BspNode node, int depth)
     {
         if (depth >= 6 || (node.W < 16 && node.H < 16)) return;
@@ -57,7 +84,6 @@ public class DungeonGenerator
             node.Left  = new BspNode(node.X, node.Y, split, node.H);
             node.Right = new BspNode(node.X + split, node.Y, node.W - split, node.H);
         }
-
         SplitNode(node.Left, depth + 1);
         SplitNode(node.Right, depth + 1);
     }
@@ -78,11 +104,11 @@ public class DungeonGenerator
         if (node.Right != null) CreateRooms(node.Right);
     }
 
-    private void CarveRoom(RoomRect room)
+    private void CarveRoom(RoomRect r)
     {
-        for (int y = room.Y; y < room.Y + room.Height; y++)
-        for (int x = room.X; x < room.X + room.Width;  x++)
-            _map.SetTile(x, y, Tile.CreateFloor());
+        for (int y = r.Y; y < r.Y + r.Height; y++)
+        for (int x = r.X; x < r.X + r.Width;  x++)
+            _map.SetTile(x, y, Tile.CreateFloor(_theme));
     }
 
     private void ConnectRooms(BspNode node)
@@ -90,34 +116,27 @@ public class DungeonGenerator
         if (node.Left == null || node.Right == null) return;
         ConnectRooms(node.Left);
         ConnectRooms(node.Right);
-
-        var leftRoom  = GetRoom(node.Left);
-        var rightRoom = GetRoom(node.Right);
-        if (leftRoom == null || rightRoom == null) return;
-
-        var p1 = new SadRogue.Primitives.Point(
-            leftRoom.Value.X  + leftRoom.Value.Width  / 2,
-            leftRoom.Value.Y  + leftRoom.Value.Height / 2);
-        var p2 = new SadRogue.Primitives.Point(
-            rightRoom.Value.X + rightRoom.Value.Width  / 2,
-            rightRoom.Value.Y + rightRoom.Value.Height / 2);
-
+        var l = GetRoom(node.Left);
+        var r = GetRoom(node.Right);
+        if (l == null || r == null) return;
+        var p1 = new SadRogue.Primitives.Point(l.Value.X + l.Value.Width / 2, l.Value.Y + l.Value.Height / 2);
+        var p2 = new SadRogue.Primitives.Point(r.Value.X + r.Value.Width / 2, r.Value.Y + r.Value.Height / 2);
         CarveCorridorL(p1, p2);
     }
 
     private void CarveCorridorL(SadRogue.Primitives.Point a, SadRogue.Primitives.Point b)
     {
         int x = a.X, y = a.Y;
-        while (x != b.X) { _map.SetTile(x, y, Tile.CreateFloor()); x += (b.X > x) ? 1 : -1; }
-        while (y != b.Y) { _map.SetTile(x, y, Tile.CreateFloor()); y += (b.Y > y) ? 1 : -1; }
-        _map.SetTile(x, y, Tile.CreateFloor());
+        while (x != b.X) { _map.SetTile(x, y, Tile.CreateFloor(_theme)); x += (b.X > x) ? 1 : -1; }
+        while (y != b.Y) { _map.SetTile(x, y, Tile.CreateFloor(_theme)); y += (b.Y > y) ? 1 : -1; }
+        _map.SetTile(x, y, Tile.CreateFloor(_theme));
     }
 
     private RoomRect? GetRoom(BspNode node)
     {
         if (node.Room != null) return node.Room;
-        RoomRect? l = node.Left  != null ? GetRoom(node.Left)  : null;
-        RoomRect? r = node.Right != null ? GetRoom(node.Right) : null;
+        var l = node.Left  != null ? GetRoom(node.Left)  : null;
+        var r = node.Right != null ? GetRoom(node.Right) : null;
         if (l == null) return r;
         if (r == null) return l;
         return _rng.NextDouble() > 0.5 ? l : r;
@@ -134,44 +153,148 @@ public class DungeonGenerator
             for (int dx = -1; dx <= 1 && !adj; dx++)
             {
                 if (dx == 0 && dy == 0) continue;
-                if (_map.GetTile(x + dx, y + dy).Type == TileType.Floor) adj = true;
+                if (_map.GetTile(x+dx, y+dy).Type == TileType.Floor) adj = true;
             }
-            if (adj) _map.SetTile(x, y, Tile.CreateWall());
+            if (adj) _map.SetTile(x, y, Tile.CreateWall(_theme));
         }
     }
 
-    private void PlaceSpawnPoints(BspNode root)
+    // ── Special room tagging ─────────────────────────────────────────────
+    private void TagRooms(List<(BspNode node, RoomRect rect)> rooms)
     {
-        var rooms = new List<RoomRect>();
-        CollectRooms(root, rooms);
-        if (rooms.Count == 0) return;
+        rooms[0].node.Tag = RoomTag.Start;
+        if (rooms.Count > 2)
+        {
+            rooms[rooms.Count - 1].node.Tag = RoomTag.Boss;
+            if (rooms.Count > 4)
+            {
+                int ti = _rng.Next(1, rooms.Count - 2);
+                rooms[ti].node.Tag = RoomTag.Treasury;
+            }
+            if (rooms.Count > 5)
+            {
+                int si = _rng.Next(1, rooms.Count - 2);
+                rooms[si].node.Tag = RoomTag.Shrine;
+            }
+        }
+    }
 
-        var startRoom = rooms[0];
+    // ── Stairs ───────────────────────────────────────────────────────────
+    private void PlaceStairs(List<(BspNode node, RoomRect rect)> rooms)
+    {
+        var start = rooms[0].rect;
         _map.StartPosition = new SadRogue.Primitives.Point(
-            startRoom.X + startRoom.Width  / 2,
-            startRoom.Y + startRoom.Height / 2);
+            start.X + start.Width / 2, start.Y + start.Height / 2);
+
+        // Stairs up in start room (except floor 1)
+        if (_floor > 1)
+        {
+            int ux = start.X + 2, uy = start.Y + 2;
+            _map.SetTile(ux, uy, Tile.CreateStairsUp());
+            _map.StairsUpPos = new SadRogue.Primitives.Point(ux, uy);
+        }
+
+        // Stairs down in last room (boss room)
+        if (rooms.Count > 1)
+        {
+            var last = rooms[rooms.Count - 1].rect;
+            int dx = last.X + last.Width / 2, dy = last.Y + last.Height / 2;
+            _map.SetTile(dx, dy, Tile.CreateStairsDown());
+            _map.StairsDownPos = new SadRogue.Primitives.Point(dx, dy);
+        }
+    }
+
+    // ── Enemy / Item spawn ───────────────────────────────────────────────
+    private void PlaceSpawnPoints(List<(BspNode node, RoomRect rect)> rooms)
+    {
+        int difficulty = _floor; // scales with floor
 
         for (int i = 1; i < rooms.Count; i++)
         {
-            int enemies = _rng.Next(1, 4);
-            for (int e = 0; e < enemies; e++)
+            var (node, rect) = rooms[i];
+            bool isBoss = node.Tag == RoomTag.Boss;
+
+            int enemyCount = isBoss
+                ? 1 + difficulty / 2   // boss room: 1 strong enemy + extras
+                : _rng.Next(1, 2 + difficulty / 3);
+
+            for (int e = 0; e < enemyCount; e++)
             {
-                int ex = rooms[i].X + _rng.Next(1, rooms[i].Width  - 1);
-                int ey = rooms[i].Y + _rng.Next(1, rooms[i].Height - 1);
+                int ex = rect.X + _rng.Next(1, rect.Width  - 1);
+                int ey = rect.Y + _rng.Next(1, rect.Height - 1);
                 if (_map.IsWalkable(ex, ey))
                     _map.EnemySpawnPoints.Add(new SadRogue.Primitives.Point(ex, ey));
             }
 
-            if (_rng.NextDouble() > 0.5)
+            // Items only in normal / treasury rooms
+            if (node.Tag != RoomTag.Boss)
             {
-                int ix = rooms[i].X + _rng.Next(1, rooms[i].Width  - 1);
-                int iy = rooms[i].Y + _rng.Next(1, rooms[i].Height - 1);
-                if (_map.IsWalkable(ix, iy))
-                    _map.ItemSpawnPoints.Add(new SadRogue.Primitives.Point(ix, iy));
+                int itemCount = node.Tag == RoomTag.Treasury ? _rng.Next(2, 5) : (_rng.NextDouble() > 0.5 ? 1 : 0);
+                for (int it = 0; it < itemCount; it++)
+                {
+                    int ix = rect.X + _rng.Next(1, rect.Width  - 1);
+                    int iy = rect.Y + _rng.Next(1, rect.Height - 1);
+                    if (_map.IsWalkable(ix, iy))
+                        _map.ItemSpawnPoints.Add(new SadRogue.Primitives.Point(ix, iy));
+                }
             }
         }
     }
 
+    // ── Doors ────────────────────────────────────────────────────────────
+    private void PlaceDoors()
+    {
+        for (int y = 1; y < _height - 1; y++)
+        for (int x = 1; x < _width  - 1; x++)
+        {
+            if (_map.GetTile(x, y).Type != TileType.Floor) continue;
+            // A tile is a good door candidate if it has walls on two opposite sides (corridor choke)
+            bool hChoke = _map.GetTile(x, y-1).Type == TileType.Wall && _map.GetTile(x, y+1).Type == TileType.Wall;
+            bool vChoke = _map.GetTile(x-1, y).Type == TileType.Wall && _map.GetTile(x+1, y).Type == TileType.Wall;
+
+            if ((hChoke || vChoke) && _rng.NextDouble() < 0.20)
+            {
+                bool locked = _rng.NextDouble() < 0.10;
+                var door = Tile.CreateDoor(false);
+                door.IsWalkable = locked ? false : false; // closed doors block movement
+                _map.SetTile(x, y, door);
+                _map.DoorPositions.Add(new SadRogue.Primitives.Point(x, y));
+            }
+        }
+    }
+
+    // ── Chests & Traps ───────────────────────────────────────────────────
+    private void PlaceChestsAndTraps(List<(BspNode node, RoomRect rect)> rooms)
+    {
+        foreach (var (node, rect) in rooms.Skip(1))
+        {
+            // Chests in treasury and occasionally normal rooms
+            if (node.Tag == RoomTag.Treasury || _rng.NextDouble() < 0.15)
+            {
+                int cx = rect.X + _rng.Next(1, rect.Width - 1);
+                int cy = rect.Y + _rng.Next(1, rect.Height - 1);
+                if (_map.IsWalkable(cx, cy))
+                {
+                    _map.SetTile(cx, cy, Tile.CreateChest());
+                    _map.ChestPositions.Add(new SadRogue.Primitives.Point(cx, cy));
+                }
+            }
+
+            // Traps in corridors / normal rooms
+            if (node.Tag == RoomTag.Normal && _rng.NextDouble() < 0.20)
+            {
+                int tx = rect.X + _rng.Next(1, rect.Width - 1);
+                int ty = rect.Y + _rng.Next(1, rect.Height - 1);
+                if (_map.IsWalkable(tx, ty) && _map.GetTile(tx, ty).Type == TileType.Floor)
+                {
+                    _map.SetTile(tx, ty, Tile.CreateTrap());
+                    _map.TrapPositions.Add(new SadRogue.Primitives.Point(tx, ty));
+                }
+            }
+        }
+    }
+
+    // ── Scenery ──────────────────────────────────────────────────────────
     private void AddScenery()
     {
         for (int y = 0; y < _height; y++)
@@ -179,14 +302,16 @@ public class DungeonGenerator
         {
             if (_map.GetTile(x, y).Type != TileType.Floor) continue;
             double r = _rng.NextDouble();
-            if      (r < 0.008) _map.SetTile(x, y, Tile.CreateRock());
-            else if (r < 0.025) _map.SetTile(x, y, Tile.CreateBush());
+            if      (r < 0.005) _map.SetTile(x, y, Tile.CreateRock());
+            else if (r < 0.015 && _theme != MapTheme.Crypt) _map.SetTile(x, y, Tile.CreateBush());
+            else if (r < 0.020 && _theme == MapTheme.Cave)  _map.SetTile(x, y, Tile.CreateWater());
         }
     }
 
-    private void CollectRooms(BspNode node, List<RoomRect> rooms)
+    // ── Utilities ────────────────────────────────────────────────────────
+    private void CollectRooms(BspNode node, List<(BspNode, RoomRect)> rooms)
     {
-        if (node.Room != null) { rooms.Add(node.Room.Value); return; }
+        if (node.Room != null) { rooms.Add((node, node.Room.Value)); return; }
         if (node.Left  != null) CollectRooms(node.Left,  rooms);
         if (node.Right != null) CollectRooms(node.Right, rooms);
     }

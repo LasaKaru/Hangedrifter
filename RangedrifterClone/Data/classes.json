@@ -1,0 +1,125 @@
+[
+  {
+    "Id": "warrior",
+    "Name": "Warrior",
+    "Description": "A heavily armoured fighter. High HP, strong melee. Abilities: Bash, Cleave, Shield Wall, Charge.",
+    "StartHp": 16,
+    "StartMana": 8,
+    "StartDamageDice": 1,
+    "StartDamageSides": 6,
+    "StartDamageBonus": 2,
+    "StartDefense": 2,
+    "StartStrength": 4,
+    "BonusDamage": 1,
+    "BonusDefense": 1,
+    "BonusMaxHp": 4,
+    "BonusMaxMana": 0,
+    "CritChance": 0.08,
+    "DodgeChance": 0.03,
+    "StartItems": ["axe","leather_armor"],
+    "Abilities": [
+      {
+        "Id":"bash","Name":"Bash","Glyph":"B","ColorHex":"#E09040",
+        "Type":"MeleeAttack","ManaCost":2,"MaxCooldown":2,"Power":6,
+        "Range":1,"Description":"Smash adjacent enemies for 6+roll damage."
+      },
+      {
+        "Id":"cleave","Name":"Cleave","Glyph":"C","ColorHex":"#E05030",
+        "Type":"AoEDamage","ManaCost":4,"MaxCooldown":4,"Power":4,"Radius":1,
+        "Description":"Swing around you, hitting all enemies in radius 1."
+      },
+      {
+        "Id":"shield_wall","Name":"Shield Wall","Glyph":"W","ColorHex":"#4080C0",
+        "Type":"Buff","ManaCost":3,"MaxCooldown":5,"Power":2,"DurationTurns":5,"StatusEffect":"Blessed",
+        "Description":"Raise your shield; +2 to all rolls for 5 turns."
+      },
+      {
+        "Id":"charge","Name":"Charge","Glyph":"►","ColorHex":"#FFD040",
+        "Type":"Dash","ManaCost":3,"MaxCooldown":3,"Power":8,"Range":4,
+        "Description":"Dash up to 4 tiles, damaging the first enemy hit."
+      }
+    ]
+  },
+  {
+    "Id": "rogue",
+    "Name": "Rogue",
+    "Description": "A swift, evasive trickster. Moderate HP, high crit chance. Abilities: Backstab, Smoke Bomb, Dual Strike, Shadowstep.",
+    "StartHp": 10,
+    "StartMana": 10,
+    "StartDamageDice": 1,
+    "StartDamageSides": 6,
+    "StartDamageBonus": 0,
+    "StartDefense": 1,
+    "StartStrength": 2,
+    "BonusDamage": 0,
+    "BonusDefense": 0,
+    "BonusMaxHp": 0,
+    "BonusMaxMana": 2,
+    "CritChance": 0.18,
+    "DodgeChance": 0.12,
+    "StartItems": ["dagger","stone"],
+    "Abilities": [
+      {
+        "Id":"backstab","Name":"Backstab","Glyph":"!","ColorHex":"#C060A0",
+        "Type":"MeleeAttack","ManaCost":2,"MaxCooldown":2,"Power":10,
+        "Range":1,"Description":"Strike for massive bonus damage."
+      },
+      {
+        "Id":"smoke_bomb","Name":"Smoke Bomb","Glyph":"*","ColorHex":"#808080",
+        "Type":"AoEDamage","ManaCost":3,"MaxCooldown":4,"Power":1,"Radius":2,"StatusEffect":"Stunned","DurationTurns":2,
+        "Description":"Blind enemies in radius 2; they skip their next turn."
+      },
+      {
+        "Id":"dual_strike","Name":"Dual Strike","Glyph":"×","ColorHex":"#E0A0C0",
+        "Type":"MeleeAttack","ManaCost":3,"MaxCooldown":3,"Power":4,
+        "Range":1,"Description":"Strike twice — deals roll+4 damage twice."
+      },
+      {
+        "Id":"shadowstep","Name":"Shadowstep","Glyph":"→","ColorHex":"#6040A0",
+        "Type":"Teleport","ManaCost":4,"MaxCooldown":4,"Power":0,"Range":6,
+        "Description":"Teleport up to 6 tiles in a chosen direction."
+      }
+    ]
+  },
+  {
+    "Id": "mage",
+    "Name": "Mage",
+    "Description": "A wielder of arcane forces. Low HP, ranged spells. Abilities: Fireball, Ice Bolt, Chain Lightning, Blink.",
+    "StartHp": 8,
+    "StartMana": 16,
+    "StartDamageDice": 1,
+    "StartDamageSides": 4,
+    "StartDamageBonus": 0,
+    "StartDefense": 0,
+    "StartStrength": 1,
+    "BonusDamage": 0,
+    "BonusDefense": 0,
+    "BonusMaxHp": 0,
+    "BonusMaxMana": 6,
+    "CritChance": 0.05,
+    "DodgeChance": 0.05,
+    "StartItems": ["potion","mana_potion"],
+    "Abilities": [
+      {
+        "Id":"fireball","Name":"Fireball","Glyph":"*","ColorHex":"#FF6020",
+        "Type":"AoEDamage","ManaCost":5,"MaxCooldown":3,"Power":8,"Radius":2,"StatusEffect":"Burning","DurationTurns":3,
+        "Description":"Launch a fireball — AoE fire damage + burning."
+      },
+      {
+        "Id":"ice_bolt","Name":"Ice Bolt","Glyph":"~","ColorHex":"#40A0E0",
+        "Type":"Debuff","ManaCost":3,"MaxCooldown":2,"Power":4,"Range":5,"StatusEffect":"Frozen","DurationTurns":2,
+        "Description":"Fire an ice bolt — freeze target for 2 turns."
+      },
+      {
+        "Id":"chain_lightning","Name":"Chain Lightning","Glyph":"↯","ColorHex":"#E0E040",
+        "Type":"AoEDamage","ManaCost":6,"MaxCooldown":5,"Power":6,"Radius":3,
+        "Description":"Lightning arcs to all enemies in radius 3."
+      },
+      {
+        "Id":"blink","Name":"Blink","Glyph":"◦","ColorHex":"#A040E0",
+        "Type":"Teleport","ManaCost":2,"MaxCooldown":2,"Power":0,"Range":8,
+        "Description":"Instantly teleport up to 8 tiles."
+      }
+    ]
+  }
+]

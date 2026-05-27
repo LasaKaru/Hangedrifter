@@ -1,42 +1,35 @@
 [
-  {
-    "Id": "meat",
-    "Name": "Meat",
-    "GlyphStr": "%",
-    "ColorHex": "#E06060",
-    "Category": "Food",
-    "Value": 5
-  },
-  {
-    "Id": "axe",
-    "Name": "Axe",
-    "GlyphStr": ")",
-    "ColorHex": "#C0C0C0",
-    "Category": "Weapon",
-    "Value": 10
-  },
-  {
-    "Id": "potion",
-    "Name": "Potion",
-    "GlyphStr": "!",
-    "ColorHex": "#8040C0",
-    "Category": "Consumable",
-    "Value": 8
-  },
-  {
-    "Id": "stone",
-    "Name": "Stone",
-    "GlyphStr": "*",
-    "ColorHex": "#A09080",
-    "Category": "Misc",
-    "Value": 1
-  },
-  {
-    "Id": "medicine",
-    "Name": "Medicine",
-    "GlyphStr": "+",
-    "ColorHex": "#40C040",
-    "Category": "Consumable",
-    "Value": 12
-  }
+  {"Id":"meat",       "Name":"Meat",        "GlyphStr":"%","ColorHex":"#E06060","Category":"Food",       "Value":5, "UseEffect":"Heal:6"},
+  {"Id":"potion",     "Name":"Potion",       "GlyphStr":"!","ColorHex":"#8040C0","Category":"Consumable", "Value":8, "UseEffect":"Heal:10"},
+  {"Id":"medicine",   "Name":"Medicine",     "GlyphStr":"+","ColorHex":"#40C040","Category":"Consumable", "Value":12,"UseEffect":"Heal:4,CurePoison"},
+  {"Id":"mana_potion","Name":"Mana Potion",  "GlyphStr":"!","ColorHex":"#2060E0","Category":"Consumable", "Value":10,"UseEffect":"Mana:8"},
+  {"Id":"stone",      "Name":"Stone",        "GlyphStr":"*","ColorHex":"#A09080","Category":"Misc",       "Value":1},
+  {"Id":"bone",       "Name":"Bone",         "GlyphStr":"/","ColorHex":"#D0C8A0","Category":"Misc",       "Value":1},
+  {"Id":"arrow",      "Name":"Arrow",        "GlyphStr":"|","ColorHex":"#C09050","Category":"Misc",       "Value":2},
+  {"Id":"spider_silk","Name":"Spider Silk",  "GlyphStr":"~","ColorHex":"#C0C0A0","Category":"Misc",       "Value":4},
+  {"Id":"fire_essence","Name":"Fire Essence","GlyphStr":"*","ColorHex":"#FF8020","Category":"Consumable", "Value":6, "UseEffect":"Burn:3:3"},
+  {"Id":"shadow_shard","Name":"Shadow Shard","GlyphStr":"*","ColorHex":"#6060A0","Category":"Misc",       "Value":5},
+  {"Id":"troll_hide", "Name":"Troll Hide",   "GlyphStr":"~","ColorHex":"#8B5E3C","Category":"Misc",       "Value":8},
+  {"Id":"dragon_scale","Name":"Dragon Scale","GlyphStr":"o","ColorHex":"#E04020","Category":"Misc",       "Value":15},
+
+  {"Id":"axe",        "Name":"Axe",          "GlyphStr":")","ColorHex":"#C0C0C0","Category":"Weapon","Value":10,"BonusDamage":2},
+  {"Id":"club",       "Name":"Club",          "GlyphStr":")","ColorHex":"#A08060","Category":"Weapon","Value":6, "BonusDamage":1},
+  {"Id":"bow",        "Name":"Short Bow",     "GlyphStr":")","ColorHex":"#C0A060","Category":"Weapon","Value":12,"BonusDamage":2},
+  {"Id":"axe_silver", "Name":"Silver Axe",    "GlyphStr":")","ColorHex":"#E0E0FF","Category":"Weapon","Value":25,"BonusDamage":4},
+  {"Id":"fire_sword", "Name":"Fire Sword",    "GlyphStr":")","ColorHex":"#FF6020","Category":"Weapon","Value":30,"BonusDamage":5},
+  {"Id":"dagger",     "Name":"Dagger",        "GlyphStr":")","ColorHex":"#A0A0C0","Category":"Weapon","Value":7, "BonusDamage":1},
+
+  {"Id":"leather_armor","Name":"Leather Armor","GlyphStr":"[","ColorHex":"#C09060","Category":"Armor","Value":8, "BonusDefense":1},
+  {"Id":"chain_mail", "Name":"Chain Mail",    "GlyphStr":"[","ColorHex":"#A0A0A0","Category":"Armor","Value":18,"BonusDefense":3},
+  {"Id":"plate_armor","Name":"Plate Armor",   "GlyphStr":"[","ColorHex":"#E0E0E0","Category":"Armor","Value":35,"BonusDefense":5,"BonusMaxHp":4},
+
+  {"Id":"wooden_shield","Name":"Wooden Shield","GlyphStr":"(","ColorHex":"#A08050","Category":"Shield","Value":6,"BonusDefense":1},
+  {"Id":"iron_shield","Name":"Iron Shield",   "GlyphStr":"(","ColorHex":"#909090","Category":"Shield","Value":15,"BonusDefense":2},
+
+  {"Id":"ring_regen", "Name":"Ring of Regen", "GlyphStr":"=","ColorHex":"#40E040","Category":"Ring","Value":20,"BonusMaxHp":3},
+  {"Id":"ring_power", "Name":"Ring of Power", "GlyphStr":"=","ColorHex":"#E04040","Category":"Ring","Value":22,"BonusDamage":2},
+  {"Id":"ring_mana",  "Name":"Ring of Mana",  "GlyphStr":"=","ColorHex":"#4040E0","Category":"Ring","Value":20,"BonusMaxMana":4},
+
+  {"Id":"amulet_shadow","Name":"Shadow Amulet","GlyphStr":"\"","ColorHex":"#6060A0","Category":"Amulet","Value":25,"BonusDefense":1,"BonusDamage":1},
+  {"Id":"bone_crown", "Name":"Bone Crown",     "GlyphStr":"^","ColorHex":"#E0D0B0","Category":"Amulet","Value":50,"BonusMaxHp":8,"BonusDamage":3}
 ]
