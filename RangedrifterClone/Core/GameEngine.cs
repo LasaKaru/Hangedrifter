@@ -543,6 +543,60 @@ public class GameEngine
         if (status != null) status.Turn++;
     }
 
+    // ── Ranged shot ───────────────────────────────────────────────────────
+    /// <summary>
+    /// Fires a ranged shot in the direction given by <paramref name="angleRad"/>.
+    /// Marches a ray up to <c>MaxRange</c> tiles, hits the first enemy found,
+    /// applies damage through the combat system, and ends the player's turn.
+    /// Returns the world-cell that was struck (or the first wall) so the caller
+    /// can show a visual flash.
+    /// </summary>
+    public (bool hitEnemy, int cellX, int cellY) FireRangedShot(double angleRad)
+    {
+        if (State != GameState.Playing || CurrentMap == null)
+            return (false, 0, 0);
+
+        var pos = EntityManager.GetComponent<PositionComponent>(PlayerEntity);
+        if (pos == null) return (false, 0, 0);
+
+        double dirX = Math.Cos(angleRad), dirY = Math.Sin(angleRad);
+        double px   = pos.X + 0.5,        py   = pos.Y + 0.5;
+
+        const int MaxRange = 22;
+        for (int step = 1; step <= MaxRange; step++)
+        {
+            int cx = (int)(px + dirX * step), cy = (int)(py + dirY * step);
+
+            // Stop at solid wall
+            var tile = CurrentMap.GetTile(cx, cy);
+            if (!tile.IsWalkable || tile.Type == TileType.Empty)
+                return (false, cx, cy);
+
+            // Check every entity at this cell for an AI (= enemy)
+            foreach (var e in EntityManager
+                .GetEntitiesWith<AIComponent, PositionComponent>()
+                .ToList())
+            {
+                var ep = EntityManager.GetComponent<PositionComponent>(e)!;
+                if (ep.X != cx || ep.Y != cy) continue;
+
+                // Hit — deal damage with a small ranged bonus
+                _combat!.AttackWithBonus(PlayerEntity, e, 3);
+
+                // Alert all nearby pack-mates
+                var ai = EntityManager.GetComponent<AIComponent>(e);
+                if (ai != null) ai.State = AIState.Hunting;
+
+                EndTurn();
+                return (true, cx, cy);
+            }
+        }
+
+        MessageLog.Add("Your shot disappears into the dark.", new SadRogue.Primitives.Color(100, 100, 70));
+        EndTurn();
+        return (false, 0, 0);
+    }
+
     // ── Floor transitions ─────────────────────────────────────────────────
     private void OnStairsDescended(int targetFloor)
     {
