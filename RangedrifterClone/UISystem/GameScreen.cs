@@ -49,8 +49,8 @@ public class GameScreen : ScreenObject
     private double[] _zBuffer         = Array.Empty<double>();
 
     // Mouse aim
-    private int  _screenCX      = 0;   // pixel centre, cached on first use
-    private int  _screenCY      = 0;
+    private int  _prevMouseX     = -1;      // last frame's X; -1 = not yet sampled
+    private bool _mouseAimActive = true;    // Esc releases; click re-captures
     private XnaInput.ButtonState _prevLMB = XnaInput.ButtonState.Released;
 
     // Gun flash
@@ -107,28 +107,37 @@ public class GameScreen : ScreenObject
                 {
                     var ms = XnaInput.Mouse.GetState();
 
-                    // Capture a virtual centre once (current cursor pos on first frame)
-                    if (_screenCX == 0)
+                    if (_mouseAimActive)
                     {
-                        _screenCX = ms.X > 0 ? ms.X : 640;
-                        _screenCY = ms.Y > 0 ? ms.Y : 400;
+                        // Delta-only tracking — no cursor lock, mouse moves freely
+                        if (_prevMouseX >= 0)
+                        {
+                            int mdx = ms.X - _prevMouseX;
+                            // Ignore huge jumps (window focus change, etc.)
+                            if (Math.Abs(mdx) < 300)
+                                _fpAngle += mdx * 0.004;
+                        }
+                        _prevMouseX = ms.X;
+
+                        // Left-click to fire
+                        if (ms.LeftButton == XnaInput.ButtonState.Pressed &&
+                            _prevLMB      == XnaInput.ButtonState.Released)
+                            TriggerRangedShot();
+                    }
+                    else
+                    {
+                        // Aim is released — left-click re-captures without firing
+                        if (ms.LeftButton == XnaInput.ButtonState.Pressed &&
+                            _prevLMB      == XnaInput.ButtonState.Released)
+                        {
+                            _mouseAimActive = true;
+                            _prevMouseX     = ms.X; // seed so no jump on recapture
+                        }
                     }
 
-                    // Delta from virtual centre → turn angle
-                    int mdx = ms.X - _screenCX;
-                    if (Math.Abs(mdx) < 400)
-                        _fpAngle += mdx * 0.004;
-
-                    // Lock cursor to virtual centre each frame
-                    XnaInput.Mouse.SetPosition(_screenCX, _screenCY);
-
-                    // Left-click to fire (rising edge only)
-                    if (ms.LeftButton == XnaInput.ButtonState.Pressed &&
-                        _prevLMB      == XnaInput.ButtonState.Released)
-                        TriggerRangedShot();
                     _prevLMB = ms.LeftButton;
                 }
-                catch { /* ignore on platforms where mouse lock unavailable */ }
+                catch { }
             }
 
             if (!_firstPersonMode) UpdateCamera();
@@ -402,7 +411,8 @@ public class GameScreen : ScreenObject
 
         // ── HUD bar ────────────────────────────────────────────────────────
         string facing = FpFacingLabel(_fpAngle);
-        string hud    = $" [{facing}]  Tab=map  Mouse=aim  LClick/Space=fire  1-4=ability";
+        string aimHint = _mouseAimActive ? "Mouse=aim  Esc=free" : "Click=recapture";
+        string hud    = $" [{facing}]  Tab=map  {aimHint}  LClick/Space=fire";
         _mapPanel.Print(1, 1, hud[..Math.Min(hud.Length, MapW - 3)], new Color(200, 180, 100), Color.Black);
         string flLbl = $"Floor {GameEngine.Instance.CurrentFloor}";
         _mapPanel.Print(MapW - flLbl.Length - 1, 1, flLbl, new Color(100, 100, 160), Color.Black);
@@ -957,6 +967,8 @@ public class GameScreen : ScreenObject
                 _equipMode       = false;
                 _abilityDirState = 0;
                 _firstPersonMode = true;
+                _mouseAimActive  = true;
+                _prevMouseX      = -1;
                 DrawBorders();
                 GameEngine.Instance.State = GameState.CharacterCreation;
             }
@@ -989,8 +1001,22 @@ public class GameScreen : ScreenObject
             return true;
         }
 
+        // Escape: release mouse aim (cursor becomes free again)
+        if (keyboard.IsKeyPressed(Keys.Escape) && _firstPersonMode)
+        {
+            _mouseAimActive = false;
+            _prevMouseX     = -1;   // prevent angle jump on next recapture
+            return true;
+        }
+
         // Tab: toggle 3-D / overhead
-        if (keyboard.IsKeyPressed(Keys.Tab)) { _firstPersonMode = !_firstPersonMode; return true; }
+        if (keyboard.IsKeyPressed(Keys.Tab))
+        {
+            _firstPersonMode = !_firstPersonMode;
+            // Re-enable aim when switching back to FP
+            if (_firstPersonMode) { _mouseAimActive = true; _prevMouseX = -1; }
+            return true;
+        }
 
         // Space / F: ranged shot
         if (keyboard.IsKeyPressed(Keys.Space) || keyboard.IsKeyPressed(Keys.F))
