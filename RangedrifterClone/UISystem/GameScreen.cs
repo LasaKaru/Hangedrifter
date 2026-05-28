@@ -58,6 +58,14 @@ public class GameScreen : ScreenObject
     private bool   _shotHit    = false;
     private int    _shotWX, _shotWY;   // world cell of impact
 
+    // Incoming enemy ranged shot visual
+    private double _incomingShotTimer = 0.0;
+    private int    _incomingShotFromX, _incomingShotFromY;
+
+    // Inventory overlay
+    private bool _inventoryOpen  = false;
+    private int  _invSelectedIdx = 0;
+
     // ── Sidebar palette ──────────────────────────────────────────────────────
     private static readonly Color LabelClr  = new(140, 140, 140);
     private static readonly Color ValueClr  = new(200, 200, 100);
@@ -95,7 +103,17 @@ public class GameScreen : ScreenObject
     {
         base.Update(delta);
         _glowTime += delta.TotalSeconds;
-        if (_shotTimer > 0) _shotTimer -= delta.TotalSeconds;
+        if (_shotTimer         > 0) _shotTimer         -= delta.TotalSeconds;
+        if (_incomingShotTimer > 0) _incomingShotTimer -= delta.TotalSeconds;
+
+        // Pick up any ranged shot an enemy just fired this turn
+        if (GameEngine.Instance.HasEnemyShot)
+        {
+            _incomingShotTimer = 0.30;
+            _incomingShotFromX = GameEngine.Instance.EnemyShotX;
+            _incomingShotFromY = GameEngine.Instance.EnemyShotY;
+            GameEngine.Instance.ClearEnemyShot();
+        }
 
         var st = GameEngine.Instance.State;
         if (st == GameState.Playing || st == GameState.GameOver)
@@ -142,6 +160,7 @@ public class GameScreen : ScreenObject
 
             if (!_firstPersonMode) UpdateCamera();
             RenderMap();
+            if (_inventoryOpen) DrawInventoryOverlay();
             RenderSidebar();
         }
     }
@@ -399,6 +418,7 @@ public class GameScreen : ScreenObject
 
         // ── Muzzle flash ──────────────────────────────────────────────────
         DrawShotFlash(viewW, viewH);
+        DrawIncomingShotFlash(viewW, viewH);
 
         // ── Crosshair ─────────────────────────────────────────────────────
         int crX = MapW / 2, crY = MapH / 2;
@@ -412,7 +432,15 @@ public class GameScreen : ScreenObject
         // ── HUD bar ────────────────────────────────────────────────────────
         string facing = FpFacingLabel(_fpAngle);
         string aimHint = _mouseAimActive ? "Mouse=aim  Esc=free" : "Click=recapture";
-        string hud    = $" [{facing}]  Tab=map  {aimHint}  LClick/Space=fire";
+        // Show pickup hint when standing on an item
+        string pickHint = "";
+        foreach (var pie in em.GetEntitiesWith<ItemComponent, PositionComponent>())
+        {
+            var pep = em.GetComponent<PositionComponent>(pie)!;
+            if (pep.X == pos.X && pep.Y == pos.Y)
+            { pickHint = $"  G={em.GetComponent<NameComponent>(pie)?.Name ?? "item"}"; break; }
+        }
+        string hud = $" [{facing}]  Tab=map  {aimHint}  LClick=fire{pickHint}";
         _mapPanel.Print(1, 1, hud[..Math.Min(hud.Length, MapW - 3)], new Color(200, 180, 100), Color.Black);
         string flLbl = $"Floor {GameEngine.Instance.CurrentFloor}";
         _mapPanel.Print(MapW - flLbl.Length - 1, 1, flLbl, new Color(100, 100, 160), Color.Black);
@@ -628,6 +656,346 @@ public class GameScreen : ScreenObject
         new Color((byte)(c.R * f), (byte)(c.G * f), (byte)(c.B * f));
 
     // ═════════════════════════════════════════════════════════════════════════
+    // DETAILED ENEMY BODY  (called per-pixel inside RenderFpSprites)
+    // ═════════════════════════════════════════════════════════════════════════
+    /// <summary>
+    /// Returns the glyph and pre-faded colour for a single cell of an enemy
+    /// sprite, based on archetype (boss / undead / beast / mage / ranged /
+    /// default humanoid), relative X position within the sprite (0=left edge,
+    /// 1=right edge) and relative Y position (0=top, 1=bottom).
+    /// </summary>
+    private (char g, Color fg) GetDetailedEnemyGlyph(
+        Entity eid, float relX, float relY, float fade)
+    {
+        var em   = GameEngine.Instance.EntityManager;
+        var r    = em.GetComponent<RenderComponent>(eid);
+        var ai   = em.GetComponent<AIComponent>(eid);
+        var name = em.GetComponent<NameComponent>(eid)?.Name?.ToLowerInvariant() ?? "";
+        var bc   = r?.Foreground ?? Color.White;
+
+        bool isBoss   = ai?.Behavior == AIBehavior.Boss;
+        bool isUndead = name.Contains("skeleton") || name.Contains("zombie")
+                     || name.Contains("lich")     || name.Contains("ghost")
+                     || name.Contains("wraith");
+        bool isBeast  = name.Contains("wolf")  || name.Contains("rat")
+                     || name.Contains("spider") || name.Contains("bat")
+                     || name.Contains("slime");
+        bool isMage   = name.Contains("mage")  || name.Contains("wizard")
+                     || name.Contains("witch")  || name.Contains("sorceress")
+                     || name.Contains("sorcerer");
+        bool isRanged = ai?.IsRanged == true && !isMage;
+
+        bool isL = relX < 0.30f, isR = relX > 0.70f;
+
+        // Helper: build a pre-faded colour from explicit RGB values
+        Color Fc(byte r2, byte g2, byte b2) =>
+            new Color((byte)(r2 * fade), (byte)(g2 * fade), (byte)(b2 * fade));
+        // Helper: pre-fade the entity's own base colour (optional dim factor)
+        Color Fb(float dim = 1f) =>
+            new Color((byte)(bc.R * fade * dim), (byte)(bc.G * fade * dim), (byte)(bc.B * fade * dim));
+
+        var steel = Fc(140, 145, 158);
+        var dark  = Fc(70,  70,  70);
+
+        if (isBoss)
+        {
+            if (relY < 0.12f) return (isL || isR ? '(' : '\x0F',  Fc(255,  60,  60)); // crown ☼
+            if (relY < 0.28f) return (isL ? '[' : isR ? ']' : '\x01', Fc(220,  60,  60)); // head
+            if (relY < 0.52f) return (isL ? '▐' : isR ? '▌' : '█', Fc(180,  40,  40)); // armoured chest
+            if (relY < 0.68f) return (isL ? '\\' : isR ? '/' : '╪', Fc(130,  50,  50)); // belt
+            if (relY < 0.86f) return (isL ? '/' : isR ? '\\' : '|', Fc(100,  40,  40)); // legs
+            return ('_', Fc(80, 30, 30));
+        }
+        if (isUndead)
+        {
+            if (relY < 0.18f) return (isL ? '(' : isR ? ')' : '\x01', Fc( 90, 200,  70)); // skull
+            if (relY < 0.35f) return (isL ? '|' : isR ? '|' : '±',   Fc( 70, 170,  55)); // ribcage
+            if (relY < 0.60f) return (isL ? '|' : isR ? '|' : 'H',   Fc( 60, 150,  45)); // spine
+            if (relY < 0.80f) return ('!', Fc(50, 120, 40));                               // ragged legs
+            return ('_', Fc(40, 100, 30));
+        }
+        if (isBeast)
+        {
+            if (relY < 0.20f) return (isL ? '/' : isR ? '\\' : 'v', Fb());        // ears/snout
+            if (relY < 0.45f) return (isL ? '/' : isR ? '\\' : '\x01', Fb());     // head
+            if (relY < 0.72f) return (isL ? '|' : isR ? '|'  : '#', Fb(0.80f));   // body
+            return (isL ? '/' : isR ? '\\' : 'w', Fb(0.65f));                      // paws
+        }
+        if (isMage)
+        {
+            if (relY < 0.14f) return (isL || isR ? ' ' : '*', Fc(110, 110, 255));          // orb
+            if (relY < 0.30f) return (isL ? '(' : isR ? ')' : '\x01', Fc(110, 110, 255));  // cowled head
+            if (relY < 0.55f) return (isL ? '(' : isR ? ')' : '|',   Fc( 80,  80, 200));  // upper robe
+            if (relY < 0.78f) return (isL ? '(' : isR ? ')' : '|',   Fc( 60,  60, 170));  // lower robe
+            return (isL ? '\\' : isR ? '/' : '~', Fc(50, 50, 140));                        // hem
+        }
+        if (isRanged)
+        {
+            if (relY < 0.20f) return (isL ? '(' : isR ? ')' : '-', Fc(180, 140,  60)); // bow
+            if (relY < 0.36f) return (isL ? '<' : isR ? '>' : '\x01', Fb());           // hooded head
+            if (relY < 0.58f) return (isL ? '|' : isR ? '|' : 'H',   Fb());           // torso
+            if (relY < 0.80f) return (isL ? '/' : isR ? '\\' : '|',  Fb(0.8f));       // legs
+            return (isL ? '/' : isR ? '\\' : '_', Fb(0.65f));
+        }
+        // Default: armoured humanoid warrior
+        if (relY < 0.16f) return (isR ? '/' : ' ', Fc(200, 190, 80));              // sword raised right
+        if (relY < 0.30f) return (isL ? '[' : isR ? ']' : '\x01', Fb());           // helmeted head
+        if (relY < 0.52f) return (isL ? '[' : isR ? ']' : '█', steel);             // armoured chest
+        if (relY < 0.68f) return (isL ? '\\' : isR ? '/' : '═', Fc(110, 115, 125)); // belt
+        if (relY < 0.86f) return (isL ? '[' : isR ? ']' : '|', dark);              // greaves
+        return (isL ? '/' : isR ? '\\' : '_', dark);                               // boots
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // INCOMING SHOT FLASH  (enemy fires back at the player)
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawIncomingShotFlash(int viewW, int viewH)
+    {
+        if (_incomingShotTimer <= 0) return;
+        var pos = GameEngine.Instance.EntityManager
+            .GetComponent<PositionComponent>(GameEngine.Instance.PlayerEntity);
+        if (pos == null) return;
+
+        float t    = (float)(_incomingShotTimer / 0.30);
+        int   crX  = MapW / 2, crY = MapH / 2;
+
+        double posX  = pos.X + 0.5, posY = pos.Y + 0.5;
+        double dx    = _incomingShotFromX + 0.5 - posX;
+        double dy    = _incomingShotFromY + 0.5 - posY;
+        double dirX  = Math.Cos(_fpAngle), dirY  = Math.Sin(_fpAngle);
+        double planX = -Math.Sin(_fpAngle) * 0.66;
+        double planY =  Math.Cos(_fpAngle) * 0.66;
+        double invDet = 1.0 / (planX * dirY - dirX * planY);
+        double txD    = invDet * ( dirY * dx - dirX * dy);
+        double txH    = invDet * (-planY * dx + planX * dy);
+
+        if (txD > 0.1)
+        {
+            // Enemy is in front — draw incoming bolt from their screen column to crosshair
+            int srcCol = Math.Clamp((int)((viewW * 0.5) * (1.0 + txH / txD)) + 1, 1, MapW - 2);
+            int step   = srcCol < crX ? 1 : -1;
+            for (int sx = srcCol; sx != crX; sx += step)
+            {
+                if (sx < 1 || sx >= MapW - 1) break;
+                float frac = 1f - (float)Math.Abs(sx - srcCol) /
+                    Math.Max(1, (float)Math.Abs(crX - srcCol));
+                byte tc = (byte)(200 * frac * t);
+                _mapPanel.SetGlyph(sx, crY, '·', new Color(tc, (byte)(tc * 0.25f), 0), Color.Black);
+            }
+        }
+
+        // Red impact splash at crosshair (visible regardless of facing)
+        if (t > 0.45f)
+        {
+            byte hr = (byte)(200 * t);
+            _mapPanel.SetGlyph(crX, crY, 'X', new Color(hr, 0, 0), Color.Black);
+            for (int ry = -2; ry <= 2; ry++)
+            for (int rx = -4; rx <= 4; rx++)
+            {
+                float dd = MathF.Sqrt(rx * rx * 0.25f + ry * ry);
+                if (dd < 1.2f || dd > 2.6f) continue;
+                int ssx = crX + rx, ssy = crY + ry;
+                if (ssx >= 1 && ssx < MapW - 1 && ssy >= 1 && ssy < MapH - 1)
+                    _mapPanel.SetGlyph(ssx, ssy, '*',
+                        new Color((byte)(hr * 0.65f), 0, 0), Color.Black);
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // INVENTORY OVERLAY
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawInventoryOverlay()
+    {
+        var em     = GameEngine.Instance.EntityManager;
+        var player = GameEngine.Instance.PlayerEntity;
+        var inv    = em.GetComponent<InventoryComponent>(player);
+        var equip  = em.GetComponent<EquipmentSlotComponent>(player);
+        var fighter= em.GetComponent<FighterComponent>(player);
+
+        const int OX = 1, OY = 1;
+        const int IW = MapW - 2;  // 57
+        const int IH = MapH - 2;  // 35
+        var ovBg   = new Color(5, 7, 16);
+        var borClr = new Color(75, 75, 125);
+        int divX   = OX + 27;     // left panel uses cols OX..divX-1
+        int detX   = divX + 1;    // right panel starts here
+
+        // ── Local helpers ──────────────────────────────────────────────────
+        void B(int x, int y, char g)
+        {
+            if (x >= 0 && x < MapW && y >= 0 && y < MapH)
+                _mapPanel.SetGlyph(x, y, g, borClr, ovBg);
+        }
+        void HLine(int y2, int x1, int x2)
+        {
+            for (int x = x1; x <= x2; x++)
+                if (y2 >= 0 && y2 < MapH) _mapPanel.SetGlyph(x, y2, '─', new Color(48,48,80), ovBg);
+        }
+        void Row(int y2, string label, string val, Color valClr)
+        {
+            if (y2 < 0 || y2 >= MapH) return;
+            _mapPanel.Print(detX,      y2, label + ":", new Color(110,110,145), ovBg);
+            _mapPanel.Print(detX + 9,  y2, val,         valClr,                 ovBg);
+        }
+        static string Tr(string s, int max) => s.Length > max ? s[..max] : s;
+        bool IsEq(InventoryEntry it) =>
+            equip != null && (equip.Weapon?.ItemId  == it.ItemId ||
+                              equip.Armor?.ItemId   == it.ItemId ||
+                              equip.Shield?.ItemId  == it.ItemId ||
+                              equip.Ring?.ItemId    == it.ItemId ||
+                              equip.Amulet?.ItemId  == it.ItemId);
+
+        // ── Background + borders ───────────────────────────────────────────
+        for (int y = OY; y < OY + IH; y++)
+        for (int x = OX; x < OX + IW; x++)
+            _mapPanel.SetGlyph(x, y, ' ', Color.Black, ovBg);
+
+        B(OX, OY, '╔'); B(OX+IW-1, OY, '╗');
+        B(OX, OY+IH-1, '╚'); B(OX+IW-1, OY+IH-1, '╝');
+        for (int x = OX+1; x < OX+IW-1; x++) { B(x, OY, '═'); B(x, OY+IH-1, '═'); }
+        for (int y = OY+1; y < OY+IH-1; y++) { B(OX, y, '║'); B(OX+IW-1, y, '║'); }
+
+        const string title = "═ INVENTORY ═";
+        _mapPanel.Print(OX + (IW - title.Length) / 2, OY, title, new Color(200,200,255), ovBg);
+
+        // Vertical divider between list and detail panels
+        B(divX, OY, '╦'); B(divX, OY+IH-1, '╩');
+        for (int y = OY+1; y < OY+IH-1; y++) B(divX, y, '║');
+
+        // ── LEFT PANEL: Item list ──────────────────────────────────────────
+        int listX   = OX + 1;
+        int listTop = OY + 2;
+        int listH   = IH - 5;
+        int items   = inv?.Items.Count ?? 0;
+        if (items > 0 && _invSelectedIdx >= items) _invSelectedIdx = items - 1;
+        if (_invSelectedIdx < 0) _invSelectedIdx = 0;
+
+        _mapPanel.Print(listX, OY+1, " #  Item               Qt",
+            new Color(100,100,145), ovBg);
+
+        int scrollOff = Math.Max(0, _invSelectedIdx - listH / 2);
+        for (int i = scrollOff; i < items && (i - scrollOff) < listH; i++)
+        {
+            int  ry    = listTop + i - scrollOff;
+            if (ry >= OY+IH-2) break;
+            bool sel   = i == _invSelectedIdx;
+            var  item  = inv!.Items[i];
+            var  rowBg = sel ? new Color(22, 22, 50) : ovBg;
+            var  iClr  = ItemClr(item.Category);
+            var  nmClr = sel ? Color.White : iClr;
+
+            for (int x = listX; x < divX; x++) _mapPanel.SetGlyph(x, ry, ' ', Color.Black, rowBg);
+
+            _mapPanel.Print(listX,     ry, sel ? ">" : " ", sel ? new Color(255,255,80) : new Color(25,25,25), rowBg);
+            _mapPanel.Print(listX + 1, ry, $"{i+1,2}", new Color(65,65,95), rowBg);
+            _mapPanel.SetGlyph(listX + 4, ry, item.Glyph, iClr, rowBg);
+            _mapPanel.Print(listX + 6, ry, Tr(item.Name, 14), nmClr, rowBg);
+            _mapPanel.Print(divX  - 5, ry, item.Count > 1 ? $"x{item.Count,2}" : " x1", new Color(80,80,80), rowBg);
+            if (IsEq(item)) _mapPanel.Print(divX - 8, ry, "EQ", new Color(75,215,75), rowBg);
+        }
+
+        if (items == 0)
+            _mapPanel.Print(listX + 2, listTop, "(empty)", new Color(55,55,80), ovBg);
+
+        // ── RIGHT PANEL: Item details ──────────────────────────────────────
+        int dy = OY + 1;
+        if (inv != null && items > 0 && _invSelectedIdx < items)
+        {
+            var item = inv.Items[_invSelectedIdx];
+            var iClr = ItemClr(item.Category);
+
+            // Title row: glyph + name
+            _mapPanel.SetGlyph(detX, dy, item.Glyph, item.Color, ovBg);
+            _mapPanel.Print(detX + 2, dy++, Tr(item.Name, IW - 33), iClr, ovBg);
+            dy++;
+            HLine(dy++, detX, OX+IW-2);
+
+            Row(dy++, "Type",  item.Category,              new Color(150,150,200));
+            if (item.Count > 1) Row(dy++, "Stack", $"x{item.Count}",    new Color(140,140,140));
+            if (item.Value > 0) Row(dy++, "Value", $"{item.Value} gold", new Color(200,200, 80));
+
+            if (!string.IsNullOrEmpty(item.UseEffect))
+            {
+                dy++;
+                HLine(dy++, detX, OX+IW-2);
+                _mapPanel.Print(detX, dy++, "USE EFFECT:", new Color(90, 210, 90), ovBg);
+                _mapPanel.Print(detX+2, dy++,
+                    Tr(item.UseEffect.Replace(",", " | "), IW - 33), new Color(70, 185, 70), ovBg);
+            }
+
+            bool hasStats = item.BonusDamage  != 0 || item.BonusDefense != 0 ||
+                            item.BonusMaxHp   != 0 || item.BonusMaxMana  != 0;
+            if (hasStats && dy < OY+IH-9)
+            {
+                dy++;
+                HLine(dy++, detX, OX+IW-2);
+                _mapPanel.Print(detX, dy++, "STATS:", new Color(175,175,95), ovBg);
+                if (item.BonusDamage  != 0) Row(dy++, "Damage",  $"+{item.BonusDamage}",  new Color(220,150, 80));
+                if (item.BonusDefense != 0) Row(dy++, "Defense", $"+{item.BonusDefense}", new Color(100,180,220));
+                if (item.BonusMaxHp   != 0) Row(dy++, "Max HP",  $"+{item.BonusMaxHp}",  new Color(100,215,100));
+                if (item.BonusMaxMana != 0) Row(dy++, "Max MP",  $"+{item.BonusMaxMana}", new Color(100,145,255));
+
+                // Comparison vs currently equipped
+                if (fighter != null && dy < OY+IH-5 && item.BonusDamage != 0)
+                {
+                    int diff = item.BonusDamage - (equip?.Weapon?.BonusDamage ?? 0);
+                    var dc = diff > 0 ? new Color(80,215,80) : diff < 0 ? new Color(215,80,80) : new Color(100,100,100);
+                    _mapPanel.Print(detX+2, dy++,
+                        $"(vs equipped: {(diff >= 0 ? "+" : "")}{diff})", dc, ovBg);
+                }
+            }
+
+            // Equipped loadout summary
+            if (equip != null && dy < OY+IH-5)
+            {
+                dy++;
+                HLine(dy++, detX, OX+IW-2);
+                _mapPanel.Print(detX, dy++, "EQUIPPED:", new Color(130,130,150), ovBg);
+                if (equip.Weapon != null && dy < OY+IH-3)
+                    _mapPanel.Print(detX+2, dy++, "W: " + Tr(equip.Weapon.Name, IW-37),
+                        new Color(200,200, 80), ovBg);
+                if (equip.Armor  != null && dy < OY+IH-3)
+                    _mapPanel.Print(detX+2, dy++, "A: " + Tr(equip.Armor.Name, IW-37),
+                        new Color(100,180,200), ovBg);
+                if (equip.Shield != null && dy < OY+IH-3)
+                    _mapPanel.Print(detX+2, dy++, "S: " + Tr(equip.Shield.Name, IW-37),
+                        new Color(100,180,200), ovBg);
+            }
+        }
+        else if (items == 0)
+        {
+            _mapPanel.Print(detX + 2, OY + 4, "No items.", new Color(55,55,80), ovBg);
+        }
+
+        // ── Action bar ─────────────────────────────────────────────────────
+        int actionY = OY + IH - 3;
+        HLine(actionY++, OX+1, OX+IW-2);
+        bool canEquip = items > 0 && _invSelectedIdx < items &&
+            inv!.Items[_invSelectedIdx].Category is "Weapon" or "Armor" or "Shield" or "Ring" or "Amulet";
+        bool canUse = items > 0 && _invSelectedIdx < items &&
+            !string.IsNullOrEmpty(inv!.Items[_invSelectedIdx].UseEffect);
+        string actStr = (canEquip ? "[E]quip  " : "")
+                      + (canUse   ? "[U]se  "   : "")
+                      + (items > 0 ? "[D]rop  "  : "")
+                      + "[I/Esc] Close";
+        _mapPanel.Print(OX + Math.Max(1, (IW - actStr.Length) / 2), actionY,
+            actStr, new Color(175,175,215), ovBg);
+        _mapPanel.Print(OX + 2, actionY + 1,
+            "W/S or ↑↓ navigate", new Color(70,70,105), ovBg);
+    }
+
+    private static Color ItemClr(string category) => category switch
+    {
+        "Weapon"              => new Color(200, 200, 100),
+        "Armor" or "Shield"   => new Color(100, 180, 200),
+        "Ring"  or "Amulet"   => new Color(200, 100, 200),
+        "Food"                => new Color(200, 120,  80),
+        "Consumable"          => new Color(160, 100, 200),
+        _                     => new Color(160, 160, 160),
+    };
+
+    // ═════════════════════════════════════════════════════════════════════════
     // SPRITE PROJECTION
     // ═════════════════════════════════════════════════════════════════════════
 
@@ -635,7 +1003,8 @@ public class GameScreen : ScreenObject
         double DistSq, double WX, double WY,
         char TopG, char BodyG, char BotG,
         Color Clr, float HMul, float WMul,
-        Entity EntityId   // Entity.None if tile sprite
+        Entity EntityId,   // Entity.None if tile sprite
+        int VertOff = 0    // positive = shift down (floor items)
     );
 
     private void RenderFpSprites(
@@ -679,6 +1048,12 @@ public class GameScreen : ScreenObject
                 sprites.Add(new SpriteInfo(dx * dx + dy * dy, p.X + 0.5, p.Y + 0.5,
                     tg, bg2, btg, r.Foreground, hm, wm, Entity.None));
             }
+            else if (em.GetComponent<ItemComponent>(e) != null)
+            {
+                // Floor item: small, shifted below horizon to sit on the ground
+                sprites.Add(new SpriteInfo(dx * dx + dy * dy, p.X + 0.5, p.Y + 0.5,
+                    r.Glyph, r.Glyph, r.Glyph, r.Foreground, 0.30f, 0.28f, e, halfH / 4));
+            }
             else
             {
                 sprites.Add(new SpriteInfo(dx * dx + dy * dy, p.X + 0.5, p.Y + 0.5,
@@ -719,8 +1094,8 @@ public class GameScreen : ScreenObject
 
             int centCol = (int)((viewW * 0.5) * (1.0 + txH / txD));
             int sprH    = Math.Max(1, Math.Min(viewH, (int)(viewH * sp.HMul / txD)));
-            int topY    = Math.Max(1, halfH + 1 - sprH / 2);
-            int botY    = Math.Min(viewH, halfH + 1 + sprH / 2);
+            int topY    = Math.Max(1, halfH + 1 - sprH / 2 + sp.VertOff);
+            int botY    = Math.Min(viewH, halfH + 1 + sprH / 2 + sp.VertOff);
             int sprW    = Math.Max(1, (int)(sprH * sp.WMul));
             int leftC   = centCol - sprW / 2;
             int rightC  = centCol + sprW / 2;
@@ -739,6 +1114,9 @@ public class GameScreen : ScreenObject
                     DrawEnemyHpBar(centCol, topY - 2, sprW, eFighter, txD);
             }
 
+            bool isEnemySprite = sp.EntityId.IsValid &&
+                em.GetComponent<AIComponent>(sp.EntityId) != null;
+
             for (int stripe = leftC; stripe <= rightC; stripe++)
             {
                 if (stripe < 0 || stripe >= viewW) continue;
@@ -746,12 +1124,21 @@ public class GameScreen : ScreenObject
                 int sx = stripe + 1;
                 if (sx < 1 || sx >= MapW - 1) continue;
 
+                float relX = sprW > 1 ? (float)(stripe - leftC) / (float)(sprW - 1) : 0.5f;
+
                 for (int sy = topY; sy <= botY; sy++)
                 {
                     if (sy < 1 || sy >= MapH - 1) continue;
                     float relY = (float)(sy - topY) / (float)totalRows;
-                    char g = relY < 0.28f ? sp.TopG : relY < 0.72f ? sp.BodyG : sp.BotG;
-                    _mapPanel.SetGlyph(sx, sy, g, spClr, Color.Black);
+                    char  dg; Color dc;
+                    if (isEnemySprite)
+                        (dg, dc) = GetDetailedEnemyGlyph(sp.EntityId, relX, relY, fade);
+                    else
+                    {
+                        dg = relY < 0.28f ? sp.TopG : relY < 0.72f ? sp.BodyG : sp.BotG;
+                        dc = spClr;
+                    }
+                    _mapPanel.SetGlyph(sx, sy, dg, dc, Color.Black);
                 }
             }
         }
@@ -998,10 +1385,11 @@ public class GameScreen : ScreenObject
             }
         }
 
-        string hint = _equipMode          ? "# to equip/unequip"
+        string hint = _inventoryOpen       ? "↑↓ nav  E=eq U=use D=drop"
+                    : _equipMode           ? "# to equip/unequip"
                     : _abilityDirState > 0 ? $"Dir: ability {_abilityDirState}"
-                    : _firstPersonMode     ? "Mouse=aim LClick=fire"
-                    : "E=equip .=wait g=get";
+                    : _firstPersonMode     ? "I=inv  Mouse=aim  LClick=fire"
+                    : "I=inv  E=equip  g=get";
         _sidebar.Print(1, TotalH - 2, hint[..Math.Min(hint.Length, SidebarW - 2)], DivClr, PanelBg);
     }
 
@@ -1116,6 +1504,35 @@ public class GameScreen : ScreenObject
             return true;
         }
 
+        // Inventory overlay: consume all input while open
+        if (_inventoryOpen)
+        {
+            var invComp = GameEngine.Instance.EntityManager
+                .GetComponent<InventoryComponent>(GameEngine.Instance.PlayerEntity);
+            int iCount = invComp?.Items.Count ?? 0;
+            if (_invSelectedIdx >= iCount) _invSelectedIdx = Math.Max(0, iCount - 1);
+
+            if (keyboard.IsKeyPressed(Keys.Escape) || keyboard.IsKeyPressed(Keys.I))
+            { _inventoryOpen = false; return true; }
+            if ((keyboard.IsKeyPressed(Keys.Up)   || keyboard.IsKeyPressed(Keys.NumPad8)
+              || keyboard.IsKeyPressed(Keys.W)) && _invSelectedIdx > 0)
+            { _invSelectedIdx--; return true; }
+            if ((keyboard.IsKeyPressed(Keys.Down)  || keyboard.IsKeyPressed(Keys.NumPad2)
+              || keyboard.IsKeyPressed(Keys.S)) && _invSelectedIdx < iCount - 1)
+            { _invSelectedIdx++; return true; }
+            if (keyboard.IsKeyPressed(Keys.E) && iCount > 0)
+            { GameEngine.Instance.TryEquipItem(_invSelectedIdx); return true; }
+            if (keyboard.IsKeyPressed(Keys.U) && iCount > 0)
+            { GameEngine.Instance.UseInventoryItem(_invSelectedIdx); return true; }
+            if (keyboard.IsKeyPressed(Keys.D) && iCount > 0)
+            {
+                GameEngine.Instance.DropItem(_invSelectedIdx);
+                if (_invSelectedIdx >= iCount - 1) _invSelectedIdx = Math.Max(0, iCount - 2);
+                return true;
+            }
+            return true; // swallow all other keys while inventory is open
+        }
+
         if (_equipMode)
         {
             for (int i = 0; i <= 9; i++)
@@ -1210,6 +1627,10 @@ public class GameScreen : ScreenObject
         { GameEngine.Instance.ProcessAction(PlayerAction.UseItem); return true; }
         if (keyboard.IsKeyPressed(Keys.E))
         { _equipMode = true; return true; }
+
+        // I: open inventory overlay
+        if (keyboard.IsKeyPressed(Keys.I))
+        { _inventoryOpen = true; _invSelectedIdx = 0; return true; }
 
         return base.ProcessKeyboard(keyboard);
     }

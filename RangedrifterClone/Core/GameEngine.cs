@@ -18,6 +18,12 @@ public class GameEngine
     public GameState     State          { get; set; } = GameState.MainMenu;
     public int           CurrentFloor   { get; private set; } = 1;
 
+    // Set by EndTurn when a ranged enemy just fired; cleared by GameScreen after pickup
+    public bool HasEnemyShot { get; private set; }
+    public int  EnemyShotX   { get; private set; }
+    public int  EnemyShotY   { get; private set; }
+    public void ClearEnemyShot() => HasEnemyShot = false;
+
     // Systems
     private MovementSystem?     _movement;
     private CombatSystem?       _combat;
@@ -437,6 +443,49 @@ public class GameEngine
         _equipment!.TryEquip(PlayerEntity, inventoryIndex);
     }
 
+    public void UseInventoryItem(int index)
+    {
+        if (State != GameState.Playing) return;
+        var inv = EntityManager.GetComponent<InventoryComponent>(PlayerEntity);
+        if (inv == null || index < 0 || index >= inv.Items.Count) return;
+        var item = inv.Items[index];
+        if (string.IsNullOrEmpty(item.UseEffect))
+        { MessageLog.Add("That item can't be used.", SadRogue.Primitives.Color.Gray); return; }
+        ApplyItemEffect(item);
+        if (item.Count > 1) item.Count--;
+        else inv.Items.RemoveAt(index);
+        MessageLog.Add($"Used {item.Name}.", SadRogue.Primitives.Color.LightGreen);
+        EndTurn();
+    }
+
+    public void DropItem(int index)
+    {
+        if (State != GameState.Playing) return;
+        var inv   = EntityManager.GetComponent<InventoryComponent>(PlayerEntity);
+        var pos   = EntityManager.GetComponent<PositionComponent>(PlayerEntity);
+        if (inv == null || pos == null || index < 0 || index >= inv.Items.Count) return;
+        var item  = inv.Items[index];
+        // Auto-unequip if this item was equipped
+        var equip = EntityManager.GetComponent<EquipmentSlotComponent>(PlayerEntity);
+        if (equip != null)
+        {
+            bool wasEquipped = false;
+            if (equip.Weapon?.ItemId  == item.ItemId) { equip.Weapon  = null; wasEquipped = true; }
+            if (equip.Armor?.ItemId   == item.ItemId) { equip.Armor   = null; wasEquipped = true; }
+            if (equip.Shield?.ItemId  == item.ItemId) { equip.Shield  = null; wasEquipped = true; }
+            if (equip.Ring?.ItemId    == item.ItemId) { equip.Ring    = null; wasEquipped = true; }
+            if (equip.Amulet?.ItemId  == item.ItemId) { equip.Amulet  = null; wasEquipped = true; }
+            if (wasEquipped) _equipment!.RecalculateStats(PlayerEntity);
+        }
+        inv.Items.RemoveAt(index);
+        if (CurrentMap != null)
+        {
+            var def = DataLoader.ItemDefinitions.FirstOrDefault(d => d.Id == item.ItemId);
+            if (def != null) SpawnItem(def, pos.X, pos.Y);
+        }
+        MessageLog.Add($"Dropped {item.Name}.", SadRogue.Primitives.Color.Gray);
+    }
+
     private void UseSelectedItem()
     {
         var inv = EntityManager.GetComponent<InventoryComponent>(PlayerEntity);
@@ -528,6 +577,12 @@ public class GameEngine
 
         // AI turns
         _ai!.ProcessTurns(CurrentMap, PlayerEntity, _combat!, _movement!);
+        if (_ai.RangedShotsFired.Count > 0)
+        {
+            var shot = _ai.RangedShotsFired[^1];
+            EnemyShotX = shot.X; EnemyShotY = shot.Y;
+            HasEnemyShot = true;
+        }
 
         // Check player death again after AI
         fighter = EntityManager.GetComponent<FighterComponent>(PlayerEntity);

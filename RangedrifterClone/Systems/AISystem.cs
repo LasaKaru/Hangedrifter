@@ -27,6 +27,9 @@ public class AISystem
     private readonly AStarPathfinder _pf = new();
     private static readonly Random   _rng = new();
 
+    // Filled each turn with world-positions of every ranged attack fired
+    public List<(int X, int Y)> RangedShotsFired { get; } = new();
+
     // How many turns an enemy investigates before returning to Idle
     private const int InvestigateTurns = 8;
 
@@ -38,6 +41,8 @@ public class AISystem
         var playerPos = _em.GetComponent<PositionComponent>(player);
         if (playerPos == null) return;
         var playerFighter = _em.GetComponent<FighterComponent>(player);
+
+        RangedShotsFired.Clear();
 
         // Snapshot so mutations during iteration are safe
         var enemies = _em.GetEntitiesWith<AIComponent, PositionComponent, FighterComponent>()
@@ -242,7 +247,8 @@ public class AISystem
 
     private void RangedAttack(Entity attacker, Entity defender, CombatSystem combat, int dist)
     {
-        // Simple ranged: deal damage if within range (no line-of-sight check for simplicity)
+        var aPos = _em.GetComponent<PositionComponent>(attacker);
+        if (aPos != null) RangedShotsFired.Add((aPos.X, aPos.Y));
         combat.Attack(attacker, defender);
     }
 
