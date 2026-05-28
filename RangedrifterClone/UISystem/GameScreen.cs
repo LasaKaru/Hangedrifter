@@ -404,58 +404,100 @@ public class GameScreen : ScreenObject
         double planX = -Math.Sin(_fpAngle) * 0.66;
         double planY  =  Math.Cos(_fpAngle) * 0.66;
 
-        (int wr, int wg, int wb) = map.Theme switch {
-            MapTheme.Cave   => (108, 122, 140),
-            MapTheme.Crypt  => (120, 108, 155),
-            MapTheme.Mines  => (145, 122,  80),
-            MapTheme.Forest => ( 55, 130,  45),
-            _               => (158, 140, 105),
-        };
+        // ── Low-poly flat-shaded palette ─────────────────────────────────
+        var (wallFront, wallSide, skyNear, skyFar, floorNear, floorFar2) =
+            FpThemePalette(map.Theme);
 
-        // ── Wall + ceiling + floor ────────────────────────────────────────
+        // Cache door tile positions for O(1) per-column lookup
+        var doorTiles = new HashSet<(int, int)>();
+        foreach (var de in em.GetEntitiesWith<FeatureComponent, PositionComponent>())
+        {
+            var ft = em.GetComponent<FeatureComponent>(de)!;
+            var dp = em.GetComponent<PositionComponent>(de)!;
+            if (ft.Type == FeatureType.Door) doorTiles.Add((dp.X, dp.Y));
+        }
+
+        // ── Per-column: half-block wall + flat sky + floor ────────────────
         for (int col = 0; col < viewW; col++)
         {
-            int sx = col + 1;
+            int    sx   = col + 1;
             double camX = 2.0 * col / Math.Max(1, viewW - 1) - 1.0;
-            double rdx  = dirX + planX * camX, rdy = dirY + planY * camX;
+            double rdx  = dirX + planX * camX;
+            double rdy  = dirY + planY * camX;
 
             var (perpDist, ySide, hitX, hitY) = CastRay(map, posX, posY, rdx, rdy);
             _zBuffer[col] = perpDist;
 
-            int lineH     = Math.Min(viewH, (int)(viewH / perpDist));
-            int drawStart = Math.Max(1,     halfH + 1 - lineH / 2);
-            int drawEnd   = Math.Min(viewH, halfH + 1 + lineH / 2);
+            // ── Flat-shaded wall color: face direction + fog ──────────────
+            float distFade = (float)Math.Max(0.05, 1.0 - perpDist / 20.0);
+            float faceMul  = ySide ? 0.58f : 1.0f;
+            float fi       = distFade * faceMul;
 
-            char wallCh = perpDist < 1.5 ? '█' : perpDist < 3.0 ? '▓'
-                        : perpDist < 6.0 ? '▒' : '░';
-
-            bool isTree = map.Theme == MapTheme.Forest &&
-                          map.GetTile(hitX, hitY).Type == TileType.Wall;
-            if (isTree) wallCh = lineH > viewH / 3 ? '♣' : '│';
-
-            float fade  = (float)Math.Max(0.06, 1.0 - perpDist / 16.0);
-            float sideM = ySide ? 0.62f : 1.0f;
-            (int br, int bg2, int bb) = isTree ? (45, 118, 35) : (wr, wg, wb);
-            var wallClr = new Color(
-                (byte)(br * fade * sideM), (byte)(bg2 * fade * sideM), (byte)(bb * fade * sideM));
-
-            // Ceiling
-            for (int sy = 1; sy < drawStart; sy++)
+            Color wallClr;
+            if (doorTiles.Contains((hitX, hitY)))
             {
-                float t = drawStart > 2 ? Math.Clamp((float)(sy - 1) / (float)(drawStart - 2), 0f, 1f) : 0f;
-                var cc = new Color((byte)(5 + (int)(10 * t)), (byte)(5 + (int)(10 * t)), (byte)(22 + (int)(48 * t)));
-                _mapPanel.SetGlyph(sx, sy, ' ', cc, cc);
+                wallClr = FpC(ySide ? 138 : 185, ySide ? 84 : 112, ySide ? 36 : 50, fi);
             }
-            // Wall
-            for (int sy = drawStart; sy <= drawEnd; sy++)
-                _mapPanel.SetGlyph(sx, sy, wallCh, wallClr, Color.Black);
-            // Floor
-            for (int sy = drawEnd + 1; sy <= viewH; sy++)
+            else if (map.Theme == MapTheme.Forest)
             {
-                float t = viewH > drawEnd ? Math.Clamp((float)(sy - drawEnd - 1) / (float)(viewH - drawEnd), 0f, 1f) : 0f;
-                float v = 1f - t;
-                var fc = new Color((byte)(int)(16 * v), (byte)(int)(28 * v), (byte)(int)(10 * v));
-                _mapPanel.SetGlyph(sx, sy, ' ', fc, fc);
+                // Tree trunks on X-face, leafy canopy on Y-face
+                wallClr = ySide ? FpC(42, 90, 26, fi) : FpC(60, 40, 18, fi);
+            }
+            else
+            {
+                wallClr = ySide
+                    ? FpC(wallSide.R,  wallSide.G,  wallSide.B,  fi)
+                    : FpC(wallFront.R, wallFront.G, wallFront.B, fi);
+            }
+
+            // ── Half-pixel wall extent (2 half-pixels per cell row) ───────
+            double lineHf    = viewH / Math.Max(0.01, perpDist);
+            int    wallTopHp = (int)Math.Max(0,          viewH - lineHf);
+            int    wallBotHp = (int)Math.Min(viewH * 2,  viewH + lineHf);
+
+            for (int sy = 1; sy <= viewH; sy++)
+            {
+                int  tHp = (sy - 1) * 2;
+                int  bHp = tHp + 1;
+                bool tw  = tHp >= wallTopHp && tHp < wallBotHp;
+                bool bw  = bHp >= wallTopHp && bHp < wallBotHp;
+
+                if (tw && bw)
+                {
+                    // Pure wall: solid flat-shaded cell
+                    _mapPanel.SetGlyph(sx, sy, ' ', wallClr, wallClr);
+                }
+                else if (!tw && !bw)
+                {
+                    if (tHp < wallTopHp)
+                    {
+                        // Ceiling: deep void at top → dark horizon
+                        float t  = halfH > 0 ? Math.Clamp((float)(sy - 1) / halfH, 0f, 1f) : 0f;
+                        var   cc = LerpC(skyFar, skyNear, t);
+                        _mapPanel.SetGlyph(sx, sy, ' ', cc, cc);
+                    }
+                    else
+                    {
+                        // Floor: bright horizon → dark far
+                        float t  = (viewH - halfH) > 0
+                            ? Math.Clamp((float)(sy - halfH - 1) / (viewH - halfH), 0f, 1f) : 0f;
+                        var   fc = LerpC(floorNear, floorFar2, t);
+                        _mapPanel.SetGlyph(sx, sy, ' ', fc, fc);
+                    }
+                }
+                else if (!tw && bw)
+                {
+                    // Ceiling → Wall boundary: ▄ fg=wallClr bg=skyColor
+                    float t  = halfH > 0 ? Math.Clamp((float)(sy - 1) / halfH, 0f, 1f) : 0f;
+                    _mapPanel.SetGlyph(sx, sy, '▄', wallClr, LerpC(skyFar, skyNear, t));
+                }
+                else
+                {
+                    // Wall → Floor boundary: ▀ fg=wallClr bg=floorColor
+                    float t  = (viewH - halfH) > 0
+                        ? Math.Clamp((float)(sy - halfH - 1) / (viewH - halfH), 0f, 1f) : 0f;
+                    _mapPanel.SetGlyph(sx, sy, '▀', wallClr, LerpC(floorNear, floorFar2, t));
+                }
             }
         }
 
@@ -1105,15 +1147,23 @@ public class GameScreen : ScreenObject
             else if (feat != null)
             {
                 (char tg, char bg2, char btg, float hm, float wm) = feat.Type switch {
-                    FeatureType.Chest      => ('\xF0', '+', '_', 0.55f, 0.65f),
-                    FeatureType.Trap       => ('^',   '^',  '^', 0.30f, 0.50f),
-                    FeatureType.StairsDown => ('>',   '>',  '>', 0.38f, 0.55f),
-                    FeatureType.StairsUp   => ('<',   '<',  '<', 0.38f, 0.55f),
-                    FeatureType.Door       => ('+',   '|',  '_', 1.0f,  0.35f),
+                    FeatureType.Chest      => ('▄', '░', '_', 0.55f, 0.70f),
+                    FeatureType.Trap       => ('▲', '▲', '.', 0.22f, 0.45f),
+                    FeatureType.StairsDown => ('▓', '▒', '░', 0.52f, 0.62f),
+                    FeatureType.StairsUp   => ('░', '▒', '▓', 0.52f, 0.62f),
+                    FeatureType.Door       => ('║', '█', '─', 1.05f, 0.38f),
                     _                      => (r.Glyph, r.Glyph, r.Glyph, 0.5f, 0.5f),
                 };
+                var featClr = feat.Type switch {
+                    FeatureType.Door       => new Color(180, 110,  50),
+                    FeatureType.Chest      => new Color(200, 160,  50),
+                    FeatureType.Trap       => new Color(220,  50,  50),
+                    FeatureType.StairsDown => new Color(140, 135, 155),
+                    FeatureType.StairsUp   => new Color(140, 135, 155),
+                    _                      => r.Foreground,
+                };
                 sprites.Add(new SpriteInfo(dx * dx + dy * dy, p.X + 0.5, p.Y + 0.5,
-                    tg, bg2, btg, r.Foreground, hm, wm, Entity.None));
+                    tg, bg2, btg, featClr, hm, wm, Entity.None));
             }
             else if (em.GetComponent<ItemComponent>(e) != null)
             {
@@ -1205,7 +1255,8 @@ public class GameScreen : ScreenObject
                         dg = relY < 0.28f ? sp.TopG : relY < 0.72f ? sp.BodyG : sp.BotG;
                         dc = spClr;
                     }
-                    _mapPanel.SetGlyph(sx, sy, dg, dc, Color.Black);
+                    var spBg = new Color((byte)(dc.R >> 3), (byte)(dc.G >> 3), (byte)(dc.B >> 3));
+                    _mapPanel.SetGlyph(sx, sy, dg, dc, spBg);
                 }
             }
         }
@@ -1737,4 +1788,38 @@ public class GameScreen : ScreenObject
         int s = (int)Math.Round(angle / (Math.PI / 4)) % 8;
         return s switch { 0=>"East",1=>"SE",2=>"South",3=>"SW",4=>"West",5=>"NW",6=>"North",7=>"NE",_=>"East" };
     }
+
+    // ── Low-poly colour helpers ───────────────────────────────────────────────
+    private static (Color wallFront, Color wallSide,
+                    Color skyNear,   Color skyFar,
+                    Color floorNear, Color floorFar)
+        FpThemePalette(MapTheme theme) => theme switch
+    {
+        MapTheme.Cave   => (new Color( 95,  88,  72), new Color( 65,  60,  50),
+                            new Color(  8,  10,  16), new Color(  3,   3,   6),
+                            new Color( 10,   8,   5), new Color(  4,   3,   2)),
+        MapTheme.Crypt  => (new Color(115, 108, 130), new Color( 80,  75,  95),
+                            new Color(  8,   5,  16), new Color(  3,   2,   7),
+                            new Color(  6,   5,  10), new Color(  3,   2,   5)),
+        MapTheme.Mines  => (new Color( 82,  72,  48), new Color( 58,  50,  34),
+                            new Color(  3,   3,   3), new Color(  1,   1,   1),
+                            new Color(  8,   6,   4), new Color(  3,   2,   2)),
+        MapTheme.Forest => (new Color( 68,  88,  45), new Color( 50,  65,  35),
+                            new Color( 12,  18,  28), new Color(  5,   8,  14),
+                            new Color( 14,  20,   8), new Color(  6,   9,   3)),
+        _               => (new Color(152, 136, 102), new Color(108,  96,  72),
+                            new Color(  6,   6,  18), new Color(  3,   3,   8),
+                            new Color( 12,  10,   6), new Color(  5,   4,   3)),
+    };
+
+    private static Color FpC(int r, int g, int b, float fi)
+    {
+        fi = Math.Clamp(fi, 0f, 1f);
+        return new Color((byte)(r * fi), (byte)(g * fi), (byte)(b * fi));
+    }
+
+    private static Color LerpC(Color a, Color b, float t) => new Color(
+        (int)(a.R + (b.R - a.R) * t),
+        (int)(a.G + (b.G - a.G) * t),
+        (int)(a.B + (b.B - a.B) * t));
 }
