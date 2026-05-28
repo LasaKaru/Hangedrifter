@@ -15,7 +15,7 @@ public class GameEngine
     public Entity        PlayerEntity   { get; private set; }
     public MessageLog    MessageLog     { get; } = new();
     public DataLoader    DataLoader     { get; } = new();
-    public GameState     State          { get; set; } = GameState.MainMenu;
+    public GameState     State          { get; set; } = GameState.Loading;
     public int           CurrentFloor   { get; private set; } = 1;
 
     // Set by EndTurn when a ranged enemy just fired; cleared by GameScreen after pickup
@@ -696,6 +696,6 @@ public class GameEngine
     }
 }
 
-public enum GameState   { MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings }
+public enum GameState   { Loading, MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings }
 public enum PlayerAction { MoveNorth, MoveSouth, MoveEast, MoveWest,
     MoveNE, MoveNW, MoveSE, MoveSW, PickUp, Wait, UseItem, OpenInventory, CloseInventory }

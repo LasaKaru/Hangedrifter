@@ -42,6 +42,9 @@ public class SettingsScreen : ScreenSurface
                 () => GameSettings.MapSize,      v => GameSettings.MapSize      = v),
             new("Show FPS",         new[]{"Off","On"},
                 () => GameSettings.ShowFps ? 1 : 0, v => GameSettings.ShowFps  = v == 1),
+            new("Fullscreen",       new[]{"Windowed","Fullscreen"},
+                () => GameSettings.Fullscreen ? 1 : 0,
+                v => { GameSettings.Fullscreen = v == 1; GameSettings.ApplyFullscreen(); }),
         };
         Render();
     }
@@ -196,9 +199,20 @@ public static class GameSettings
     public static int  ColourScheme  { get; set; } = 0;
     public static int  MapSize       { get; set; } = 2;  // index into {120,160,200,250}
     public static bool ShowFps       { get; set; } = false;
+    public static bool Fullscreen    { get; set; } = false;
 
     public static int ActualFovRadius   => FovRadius switch { 0=>7, 1=>9, 2=>12, _=>50 };
     public static int ActualMapWidth    => MapSize  switch { 0=>120, 1=>160, 2=>200, _=>250 };
     public static int ActualLogRows     => LogSize  switch { 0=>8,  1=>13, _=>18 };
     public static float DifficultyMult  => Difficulty switch { 0=>1f, 1=>1.5f, _=>2f };
+
+    public static void ApplyFullscreen()
+    {
+        var gdm = SadConsole.Host.Global.GraphicsDeviceManager;
+        if (gdm != null)
+        {
+            gdm.IsFullScreen = Fullscreen;
+            gdm.ApplyChanges();
+        }
+    }
 }

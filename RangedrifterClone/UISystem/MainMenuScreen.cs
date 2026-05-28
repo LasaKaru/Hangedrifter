@@ -15,12 +15,12 @@ namespace RangedrifterClone.UISystem;
 public class MainMenuScreen : ScreenSurface
 {
     // ── Sub-page state ────────────────────────────────────────────────────
-    private enum Page { Main, HowToPlay, About, Technical }
+    private enum Page { Main, HowToPlay, About, Technical, Donate, Community }
     private Page _page     = Page.Main;
     private int  _selected = 0;
 
     private static readonly string[] MenuItems =
-        { "New Game", "How To Play", "About", "Settings", "Quit" };
+        { "New Game", "How To Play", "About", "Support Us", "Community", "Settings", "Quit" };
 
     // ── Palette ───────────────────────────────────────────────────────────
     private static readonly Color Gold      = new(255, 200,  40);
@@ -62,6 +62,8 @@ public class MainMenuScreen : ScreenSurface
             case Page.HowToPlay: RenderHowToPlay(); break;
             case Page.About:     RenderAbout();     break;
             case Page.Technical: RenderTechnical(); break;
+            case Page.Donate:    RenderDonate();    break;
+            case Page.Community: RenderCommunity(); break;
         }
     }
 
@@ -346,6 +348,144 @@ public class MainMenuScreen : ScreenSurface
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // SUPPORT US / DONATE PAGE
+    // ═══════════════════════════════════════════════════════════════════════
+    private void RenderDonate()
+    {
+        DrawOverlayBox("SUPPORT US  ♥", new Color(160, 50, 80));
+
+        int x = 3, y = 3;
+
+        string brand = "helao2 (Pvt) Ltd.";
+        this.Print(Width - brand.Length - 3, 2, brand, BrandClr, new Color(4, 4, 8));
+
+        Section(ref y, "WHY WE NEED YOUR SUPPORT", x);
+        Info(ref y, "RANGEDRIFTER is an independent passion project built by a", x);
+        Info(ref y, "small team at helao2 (Pvt) Ltd.  Server costs, tooling,", x);
+        Info(ref y, "art assets, and development time are all self-funded.", x);
+        Info(ref y, "Your donations directly fuel new features, multiplayer,", x);
+        Info(ref y, "and the long-term health of this project.", x);
+        y++;
+
+        Section(ref y, "DONATION TIERS", x);
+
+        // Tier table
+        var tiers = new[]
+        {
+            ("☆  Explorer",   "$1–$4   /mo", "Supporter badge in community  +  early changelogs"),
+            ("★  Adventurer", "$5–$9   /mo", "All above  +  name in credits  +  beta access"),
+            ("✦  Hero",       "$10–$24 /mo", "All above  +  Discord role  +  vote on features"),
+            ("♛  Legend",     "$25+    /mo", "All above  +  custom character name in game lore"),
+        };
+
+        var tierColors = new[]
+        {
+            new Color(160, 160, 160),
+            new Color(100, 200, 100),
+            new Color(100, 180, 255),
+            new Color(255, 200,  50),
+        };
+
+        for (int i = 0; i < tiers.Length; i++)
+        {
+            if (y >= Height - 6) break;
+            var (tier, price, perk) = tiers[i];
+            DrawBox(x, y, Width - x - 2, 4, tierColors[i]);
+            this.Print(x + 2, y + 1, tier.PadRight(16), tierColors[i], new Color(4, 4, 8));
+            this.Print(x + 2, y + 2, price.PadRight(14), new Color(220, 220, 100), new Color(4, 4, 8));
+            this.Print(x + 18, y + 1, perk, InfoClr, new Color(4, 4, 8));
+            y += 5;
+        }
+
+        if (y < Height - 8)
+        {
+            Section(ref y, "HOW TO DONATE", x);
+            Info(ref y, "Visit:  https://helao2.itch.io/rangedrifter", x);
+            Info(ref y, "Or scan the QR code on our community page.", x);
+            Info(ref y, "All major cards & PayPal accepted via itch.io.", x);
+            y++;
+            Info(ref y, "Thank you for keeping indie games alive! ♥", x);
+        }
+
+        string copy = "© 2026  helao2 (Pvt) Ltd.  All Rights Reserved.";
+        this.Print((Width - copy.Length) / 2, Height - 3, copy, CopyClr, new Color(4, 4, 8));
+
+        Footer("Esc = menu    C = Community & Roadmap");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // COMMUNITY & ROADMAP PAGE
+    // ═══════════════════════════════════════════════════════════════════════
+    private void RenderCommunity()
+    {
+        DrawOverlayBox("COMMUNITY  &  ROADMAP", new Color(40, 80, 140));
+
+        int x = 3, y = 3;
+
+        string brand = "helao2 (Pvt) Ltd.";
+        this.Print(Width - brand.Length - 3, 2, brand, BrandClr, new Color(4, 4, 8));
+
+        Section(ref y, "JOIN THE COMMUNITY", x);
+        Info(ref y, "Discord  :  discord.gg/rangedrifter   (get the link on itch.io)", x);
+        Info(ref y, "Reddit   :  r/rangedrifter", x);
+        Info(ref y, "Itch.io  :  helao2.itch.io/rangedrifter", x);
+        Info(ref y, "GitHub   :  github.com/lasakaru/hangedrifter", x);
+        y++;
+
+        Section(ref y, "PLANNED FEATURES  (vote on Discord!)", x);
+
+        var features = new[]
+        {
+            ("v0.4  — Near-term",   new Color(100, 200, 100), new[]
+            {
+                "Persistent save / load  (JSON serialisation)",
+                "Full permadeath mode  with leaderboard",
+                "5 more enemy archetypes  (Lich, Dragon, …)",
+                "Crafting system  +  identified scrolls / potions",
+            }),
+            ("v0.5  — Mid-term",    new Color(100, 180, 255), new[]
+            {
+                "Steam / itch.io achievements",
+                "Daily dungeon seed  (global leaderboard)",
+                "Modding support  (JSON enemy / item packs)",
+                "Linux + macOS standalone builds",
+            }),
+            ("v1.0  — Multiplayer", new Color(255, 200, 50), new[]
+            {
+                "Co-op dungeon delve  (2-player LAN / online)",
+                "Live community play  —  spectate friends' runs",
+                "Asynchronous ghost mode  (see top run ghosts)",
+                "Clan / party system  with shared leaderboard",
+            }),
+            ("Future",              new Color(200, 100, 200), new[]
+            {
+                "In-game live chat  (lobby + dungeon messages)",
+                "Mobile port  (Android first, then iOS)",
+                "Cloud save  (sync progress across devices)",
+                "Seasonal events  +  limited-time dungeons",
+            }),
+        };
+
+        foreach (var (header, hClr, items) in features)
+        {
+            if (y >= Height - 5) break;
+            this.Print(x, y++, $"  ◆ {header}", hClr, new Color(4, 4, 8));
+            foreach (var item in items)
+            {
+                if (y >= Height - 4) break;
+                this.Print(x + 4, y, "·  ", new Color(80, 80, 80), new Color(4, 4, 8));
+                this.Print(x + 7, y++, item, InfoClr, new Color(4, 4, 8));
+            }
+            y++;
+        }
+
+        string copy = "© 2026  helao2 (Pvt) Ltd.  All Rights Reserved.";
+        this.Print((Width - copy.Length) / 2, Height - 3, copy, CopyClr, new Color(4, 4, 8));
+
+        Footer("Esc = menu    D = Support Us / Donate");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // SHARED OVERLAY HELPERS
     // ═══════════════════════════════════════════════════════════════════════
     private void DrawOverlayBox(string title, Color accentClr)
@@ -474,6 +614,12 @@ public class MainMenuScreen : ScreenSurface
             if (_page == Page.Technical && kb.IsKeyPressed(Keys.A))
             { _page = Page.About; Render(); return; }
 
+            // Donate ↔ Community cross-link
+            if (_page == Page.Donate && kb.IsKeyPressed(Keys.C))
+            { _page = Page.Community; Render(); return; }
+            if (_page == Page.Community && kb.IsKeyPressed(Keys.D))
+            { _page = Page.Donate; Render(); return; }
+
             return; // no further input on sub-pages
         }
 
@@ -487,10 +633,12 @@ public class MainMenuScreen : ScreenSurface
             switch (_selected)
             {
                 case 0: GameEngine.Instance.State = GameState.CharacterCreation; break;
-                case 1: _page = Page.HowToPlay; Render();                        break;
-                case 2: _page = Page.About;     Render();                        break;
-                case 3: GameEngine.Instance.State = GameState.Settings;          break;
-                case 4: Environment.Exit(0);                                     break;
+                case 1: _page = Page.HowToPlay;  Render();                       break;
+                case 2: _page = Page.About;       Render();                      break;
+                case 3: _page = Page.Donate;      Render();                      break;
+                case 4: _page = Page.Community;   Render();                      break;
+                case 5: GameEngine.Instance.State = GameState.Settings;          break;
+                case 6: Environment.Exit(0);                                     break;
             }
         }
     }
