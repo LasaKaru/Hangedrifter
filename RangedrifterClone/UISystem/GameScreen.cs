@@ -74,6 +74,10 @@ public class GameScreen : ScreenObject
     private static readonly SadRogue.Primitives.Color ToastGold = new(255, 200, 50);
     private static readonly SadRogue.Primitives.Color ToastBg   = new(20, 15, 5);
 
+    // Melee hit flash
+    private double _meleeHitTimer = 0;
+    private int    _prevPlayerHp  = -1;
+
     // ── Sidebar palette ──────────────────────────────────────────────────────
     private static readonly Color LabelClr  = new(140, 140, 140);
     private static readonly Color ValueClr  = new(200, 200, 100);
@@ -114,6 +118,7 @@ public class GameScreen : ScreenObject
         if (_shotTimer         > 0) _shotTimer         -= delta.TotalSeconds;
         if (_incomingShotTimer > 0) _incomingShotTimer -= delta.TotalSeconds;
         if (_toastTimer        > 0) _toastTimer        -= delta.TotalSeconds;
+        if (_meleeHitTimer     > 0) _meleeHitTimer     -= delta.TotalSeconds;
 
         // Dequeue next achievement toast
         if (_toastTimer <= 0 &&
@@ -132,6 +137,18 @@ public class GameScreen : ScreenObject
             _incomingShotFromX = GameEngine.Instance.EnemyShotX;
             _incomingShotFromY = GameEngine.Instance.EnemyShotY;
             GameEngine.Instance.ClearEnemyShot();
+        }
+
+        // Melee hit detection: HP decreased this frame without a ranged shot
+        {
+            var hpC = GameEngine.Instance.EntityManager
+                .GetComponent<FighterComponent>(GameEngine.Instance.PlayerEntity);
+            if (hpC != null && GameEngine.Instance.State == GameState.Playing)
+            {
+                if (_prevPlayerHp > 0 && hpC.Hp < _prevPlayerHp && _incomingShotTimer < 0.29)
+                    _meleeHitTimer = 0.5;
+                _prevPlayerHp = hpC.Hp;
+            }
         }
 
         var st = GameEngine.Instance.State;
@@ -528,6 +545,7 @@ public class GameScreen : ScreenObject
         // ── Muzzle flash ──────────────────────────────────────────────────
         DrawShotFlash(viewW, viewH);
         DrawIncomingShotFlash(viewW, viewH);
+        DrawMeleeHitFlash(viewW, viewH);
 
         // ── Crosshair ─────────────────────────────────────────────────────
         int crX = MapW / 2, crY = MapH / 2;
@@ -556,6 +574,9 @@ public class GameScreen : ScreenObject
 
         // ── Mini-map ───────────────────────────────────────────────────────
         DrawFpMiniMap(map, pos);
+
+        // ── Weapon viewmodel (ranged/magic weapons only) ──────────────────
+        DrawWeaponViewModel();
 
         // ── Player body (drawn last so it's always on top) ─────────────────
         DrawPlayerBody();
@@ -671,28 +692,36 @@ public class GameScreen : ScreenObject
         switch (pClass)
         {
             // ── WARRIOR ─────────────────────────────────────────────────────
-            // Sword arm raised upper-right; heavy plate armour; wide stance.
+            //      /          ← sword tip
+            //    /
+            // [☺]     +      ← head [☺]; crossguard + at head level (right)
+            // <[▄▄▄]>        ← pauldrons + breastplate
+            // | ═╪═ |        ← belt + centre clasp
+            // / [─] \        ← waist tassets
+            // [   ] [   ]    ← two separate greaves
+            // /__ \ /__ \    ← heavy boots
             case PlayerClass.Warrior:
-                // Sword (raised diagonally)
-                P(+5, -7, '/', wclr); P(+4, -6, '/', wclr); P(+3, -5, '/', wclr);
-                P(+2, -4, '+', wclr);           // crossguard
-                // Helmet + face
+                // Sword raised up-right (blade above, crossguard at head level)
+                P(+5, -7, '/', wclr); P(+4, -6, '/', wclr);
+                // Helmet + face; crossguard at same row, to the right
                 P(-1, -5, '[', steel); P(0, -5, '\x01', clr); P(+1, -5, ']', steel);
+                P(+3, -5, '+', wclr);                              // crossguard
                 // Pauldrons (shoulder guards)
                 P(-3, -4, '<', steel); P(-2, -4, '[', steel);
-                P(-1, -4, '▄', dstl); P(0, -4, '▄', dstl); P(+1, -4, '▄', dstl);
+                P(-1, -4, '▄', dstl);  P(0, -4, '▄', dstl);  P(+1, -4, '▄', dstl);
                 P(+2, -4, ']', steel); P(+3, -4, '>', steel);
-                // Chest + belt
+                // Chest plate + belt clasp
                 P(-2, -3, '|', dark); P(-1, -3, '═', dstl);
-                P(0,  -3, '╪', dstl); P(+1, -3, '═', dstl); P(+2, -3, '|', dark);
-                // Waist / tassets
+                P( 0, -3, '╪', dstl); P(+1, -3, '═', dstl); P(+2, -3, '|', dark);
+                // Waist tassets
                 P(-2, -2, '/', dark); P(-1, -2, '[', dstl);
-                P(0,  -2, '─', dstl); P(+1, -2, ']', dstl); P(+2, -2, '\\', dark);
-                // Upper legs (greaves)
-                P(-1, -1, '[', dim);  P(0, -1, ' ', clr);  P(+1, -1, ']', dim);
-                // Boots
-                P(-2, 0, '/', dstl); P(-1, 0, '_', dstl);
-                P(+1, 0, '_', dstl); P(+2, 0, '\\', dstl);
+                P( 0, -2, '─', dstl); P(+1, -2, ']', dstl); P(+2, -2, '\\', dark);
+                // Two separate armoured greaves
+                P(-3, -1, '[', dim); P(-2, -1, ' ', dim); P(-1, -1, ']', dim);
+                P(+1, -1, '[', dim); P(+2, -1, ' ', dim); P(+3, -1, ']', dim);
+                // Heavy boots (symmetric)
+                P(-4, 0, '/', dstl); P(-3, 0, '_', dstl); P(-2, 0, '_', dstl); P(-1, 0, '\\', dstl);
+                P(+1, 0, '/', dstl); P(+2, 0, '_', dstl); P(+3, 0, '_', dstl); P(+4, 0, '\\', dstl);
                 break;
 
             // ── MAGE ────────────────────────────────────────────────────────
@@ -907,6 +936,102 @@ public class GameScreen : ScreenObject
                 if (ssx >= 1 && ssx < MapW - 1 && ssy >= 1 && ssy < MapH - 1)
                     _mapPanel.SetGlyph(ssx, ssy, '*',
                         new Color((byte)(hr * 0.65f), 0, 0), Color.Black);
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // MELEE HIT FLASH  (red vignette border when hit by an enemy)
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawMeleeHitFlash(int viewW, int viewH)
+    {
+        if (_meleeHitTimer <= 0) return;
+        float t = (float)Math.Min(1.0, _meleeHitTimer / 0.5);
+        byte r = (byte)(175 * t), d = (byte)(r >> 1);
+        // Two-pixel-wide red border around the whole FP view
+        for (int vx = 1; vx <= viewW; vx++)
+        {
+            _mapPanel.SetBackground(vx, 1,          new Color(r, 0, 0));
+            _mapPanel.SetBackground(vx, 2,          new Color(d, 0, 0));
+            _mapPanel.SetBackground(vx, viewH,      new Color(r, 0, 0));
+            _mapPanel.SetBackground(vx, viewH - 1,  new Color(d, 0, 0));
+        }
+        for (int vy = 1; vy <= viewH; vy++)
+        {
+            _mapPanel.SetBackground(1,          vy, new Color(r, 0, 0));
+            _mapPanel.SetBackground(2,          vy, new Color(d, 0, 0));
+            _mapPanel.SetBackground(viewW,      vy, new Color(r, 0, 0));
+            _mapPanel.SetBackground(viewW - 1,  vy, new Color(d, 0, 0));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // WEAPON VIEW-MODEL  (bottom-right: ranged/magic weapon held in hand)
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawWeaponViewModel()
+    {
+        var em    = GameEngine.Instance.EntityManager;
+        var equip = em.GetComponent<EquipmentSlotComponent>(GameEngine.Instance.PlayerEntity);
+        if (equip?.Weapon == null) return;
+
+        var wName = equip.Weapon.Name.ToLowerInvariant();
+        bool isRanged = wName.Contains("bow") || wName.Contains("crossbow")
+                     || wName.Contains("gun") || wName.Contains("sling");
+        bool isMagic  = wName.Contains("staff") || wName.Contains("wand") || wName.Contains("rod");
+        if (!isRanged && !isMagic) return;   // melee shown in player body
+
+        float flash = _shotTimer > 0 ? (float)(_shotTimer / 0.18) : 0f;
+
+        // Anchor bottom-right, beside the player body
+        int bx = MapW / 2 + 10, by = MapH - 3;
+
+        void W(int dx, int dy, char g, Color fg)
+        {
+            int sx = bx + dx, sy = by + dy;
+            if (sx >= 1 && sx < MapW - 1 && sy >= 1 && sy < MapH - 1)
+                _mapPanel.SetGlyph(sx, sy, g, fg, Color.Black);
+        }
+
+        if (isRanged)
+        {
+            var bowClr = new Color(155, 115, 55);
+            var strClr = new Color(210, 195, 165);
+            var hand   = new Color(120, 90, 55);
+            // Bow limbs — vertical arc
+            W(0, -6, '(', bowClr); W(0, -5, '|', bowClr);
+            W(0, -4, '<', bowClr); W(0, -3, '|', bowClr); W(0, -2, '(', bowClr);
+            // Hand on grip
+            W(1, -4, ')', hand); W(1, -3, '|', hand); W(1, -2, ')', hand);
+            // Arrow nocked across bow
+            W(-3, -4, '─', strClr); W(-2, -4, '─', strClr); W(-1, -4, '>', strClr);
+            // Muzzle flash / release spark
+            if (flash > 0)
+            {
+                W(-4, -4, '~', new Color((byte)(255*flash), (byte)(180*flash), 0));
+                W(-5, -4, '≡', new Color((byte)(200*flash), (byte)(120*flash), 0));
+                W(-6, -4, '·', new Color((byte)(150*flash), (byte)(80*flash),  0));
+            }
+        }
+        else  // magic staff
+        {
+            var stfClr = new Color(140, 108, 58);
+            var orbClr = new Color(
+                (byte)Math.Min(255, 80  + (int)(175 * flash)),
+                (byte)Math.Min(255, 70  + (int)(130 * flash)),
+                255);
+            // Orb tip
+            W(0, -7, '*', orbClr);
+            W(-1,-7, '·', orbClr); W(1, -7, '·', orbClr);
+            // Shaft diagonal
+            W(0, -6, '|', stfClr); W(0, -5, '|', stfClr);
+            W(-1,-4, '/', stfClr); W(0, -4, '|', stfClr);
+            W(-2,-3, '/', stfClr); W(-3, -2, '/', stfClr);
+            // Spell burst on fire
+            if (flash > 0)
+            {
+                W(-1,-8, '*', new Color((byte)(255*flash), (byte)(80*flash),  (byte)(255*flash)));
+                W( 1,-8, '*', new Color((byte)(180*flash), (byte)(50*flash),  (byte)(255*flash)));
+                W( 0,-8, '☼', new Color((byte)(255*flash), (byte)(200*flash), (byte)(255*flash)));
             }
         }
     }
@@ -1188,14 +1313,17 @@ public class GameScreen : ScreenObject
             if (!tile.IsVisible) continue;
             if (tile.Type is not (TileType.Rock or TileType.Bush or TileType.Water)) continue;
             double ddx = wx + 0.5 - posX, ddy = wy + 0.5 - posY;
-            (char tg, char bg2, Color col, float hm, float wm) = tile.Type switch {
-                TileType.Rock  => ('\xF9', '\xF9',  new Color(165, 155, 135), 0.38f, 0.55f),
-                TileType.Bush  => ('"',    '"',     new Color( 55, 145,  55), 0.45f, 0.65f),
-                TileType.Water => ('\xF7', '\xF7',  new Color( 65, 130, 210), 0.18f, 1.00f),
-                _              => ('.',   '.',       Color.White,              0.30f, 0.50f),
+            (char topG, char midG, char botG, Color col, float hm, float wm) = tile.Type switch {
+                // Rock: boulder — shaded cube top/side/base
+                TileType.Rock  => ('▓', '▒', '▄', new Color(165, 155, 135), 0.48f, 0.60f),
+                // Bush/Tree: canopy triangle ▲ + trunk ║ + ground base ▄
+                TileType.Bush  => ('▲', '║', '▄', new Color( 55, 145,  55), 0.88f, 0.40f),
+                // Water: animated ripple glyphs
+                TileType.Water => ('≈', '~', '~', new Color( 65, 130, 210), 0.18f, 1.00f),
+                _              => ('.', '.', '.', Color.White,               0.30f, 0.50f),
             };
             sprites.Add(new SpriteInfo(ddx * ddx + ddy * ddy, wx + 0.5, wy + 0.5,
-                tg, bg2, bg2, col, hm, wm, Entity.None));
+                topG, midG, botG, col, hm, wm, Entity.None));
         }
 
         sprites.Sort((a, b) => b.DistSq.CompareTo(a.DistSq));
@@ -1253,7 +1381,13 @@ public class GameScreen : ScreenObject
                     else
                     {
                         dg = relY < 0.28f ? sp.TopG : relY < 0.72f ? sp.BodyG : sp.BotG;
-                        dc = spClr;
+                        // Two-tone tree: green canopy ▲ / brown trunk ║
+                        if (sp.TopG == '▲' && sp.BodyG == '║')
+                            dc = relY < 0.48f
+                                ? new Color((byte)(50 * fade), (byte)(148 * fade), (byte)(38 * fade))
+                                : new Color((byte)(85 * fade), (byte)(56 * fade),  (byte)(22 * fade));
+                        else
+                            dc = spClr;
                     }
                     var spBg = new Color((byte)(dc.R >> 3), (byte)(dc.G >> 3), (byte)(dc.B >> 3));
                     _mapPanel.SetGlyph(sx, sy, dg, dc, spBg);
