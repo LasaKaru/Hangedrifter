@@ -267,7 +267,18 @@ public class CharacterCreationScreen : ScreenSurface
         { _selected = (_selected + 1) % _classes.Count; Render(); }
 
         else if (kb.IsKeyPressed(Keys.Enter) || kb.IsKeyPressed(Keys.Space))
-        { GameEngine.Instance.StartNewGame(_classes[_selected].Id); }
+        {
+            var eng = GameEngine.Instance;
+            if (eng.IsDailyPending)
+            {
+                eng.IsDailyPending = false;
+                eng.StartDailyChallenge(_classes[_selected].Id);
+            }
+            else
+            {
+                eng.StartNewGame(_classes[_selected].Id);
+            }
+        }
 
         else if (kb.IsKeyPressed(Keys.Escape))
         { GameEngine.Instance.State = GameState.MainMenu; }

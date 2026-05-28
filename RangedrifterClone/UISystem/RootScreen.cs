@@ -14,6 +14,7 @@ public class RootScreen : ScreenObject
     private CharacterCreationScreen?  _charCreate;
     private GameScreen?               _gameScreen;
     private SettingsScreen?           _settings;
+    private LeaderboardScreen?        _leaderboard;
     private GameState                 _lastState = GameState.Loading;
 
     public RootScreen()
@@ -95,15 +96,27 @@ public class RootScreen : ScreenObject
                     _gameScreen.ShowGameOver();
                 }
                 break;
+
+            case GameState.Leaderboard:
+                if (_leaderboard == null)
+                {
+                    _leaderboard = new LeaderboardScreen();
+                    Children.Add(_leaderboard);
+                }
+                _leaderboard.Refresh();
+                _leaderboard.IsVisible = true;
+                _leaderboard.IsFocused = true;
+                break;
         }
     }
 
     private void HideAll()
     {
-        if (_loading    != null) _loading.IsVisible    = false;
-        if (_mainMenu   != null) _mainMenu.IsVisible   = false;
-        if (_settings   != null) _settings.IsVisible   = false;
-        if (_charCreate != null) _charCreate.IsVisible = false;
-        if (_gameScreen != null) _gameScreen.IsVisible = false;
+        if (_loading     != null) _loading.IsVisible     = false;
+        if (_mainMenu    != null) _mainMenu.IsVisible    = false;
+        if (_settings    != null) _settings.IsVisible    = false;
+        if (_charCreate  != null) _charCreate.IsVisible  = false;
+        if (_gameScreen  != null) _gameScreen.IsVisible  = false;
+        if (_leaderboard != null) _leaderboard.IsVisible = false;
     }
 }

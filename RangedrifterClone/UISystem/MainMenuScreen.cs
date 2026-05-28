@@ -19,8 +19,10 @@ public class MainMenuScreen : ScreenSurface
     private Page _page     = Page.Main;
     private int  _selected = 0;
 
+    // Menu items — "Continue" is always index 0; grayed when no save exists
     private static readonly string[] MenuItems =
-        { "New Game", "How To Play", "About", "Support Us", "Community", "Settings", "Quit" };
+        { "Continue", "New Game", "Daily Challenge", "Leaderboard",
+          "How To Play", "About", "Support Us", "Community", "Settings", "Quit" };
 
     // ── Palette ───────────────────────────────────────────────────────────
     private static readonly Color Gold      = new(255, 200,  40);
@@ -107,20 +109,28 @@ public class MainMenuScreen : ScreenSurface
 
     private void DrawMenuPanel()
     {
-        int px = 4, py = 20;
-        int pw = 28, ph = MenuItems.Length * 2 + 4;
+        bool hasSave  = RangedrifterClone.Core.SaveSystem.HasSave();
+        int px = 4, py = 18;
+        int pw = 30, ph = MenuItems.Length * 2 + 4;
         DrawBox(px, py, pw, ph, new Color(70, 60, 40));
         this.Print(px + 2, py + 1, "── MAIN MENU ──", new Color(120, 100, 50), Color.Black);
         for (int i = 0; i < MenuItems.Length; i++)
         {
-            bool sel   = i == _selected;
-            int  row   = py + 3 + i * 2;
-            var  fg    = sel ? SelClr  : NormClr;
-            var  bg    = sel ? new Color(15, 35, 15) : Color.Black;
-            var  arrow = sel ? "►" : " ";
-            string text = ($" {arrow} {MenuItems[i]}").PadRight(pw - 2);
+            bool sel      = i == _selected;
+            bool disabled = i == 0 && !hasSave;   // "Continue" when no save
+            int  row      = py + 3 + i * 2;
+            var  fg       = disabled ? new Color(55, 55, 55) :
+                            sel      ? SelClr : NormClr;
+            var  bg       = sel && !disabled ? new Color(15, 35, 15) : Color.Black;
+            var  arrow    = sel ? "►" : " ";
+            string extra  = i == 0 && hasSave ? " ◄" : "";
+            string text   = ($" {arrow} {MenuItems[i]}{extra}").PadRight(pw - 2);
             this.Print(px + 1, row, text, fg, bg);
         }
+        // Daily seed hint
+        int dailySeed = DateOnly.FromDateTime(DateTime.Today).DayNumber;
+        string hint = $"Daily seed: #{dailySeed}";
+        this.Print(px + 1, py + ph + 1, hint, new Color(60, 100, 130), Color.Black);
     }
 
     private void DrawDungeonBackdrop()
@@ -630,15 +640,31 @@ public class MainMenuScreen : ScreenSurface
         { _selected = (_selected + 1) % MenuItems.Length; Render(); }
         else if (kb.IsKeyPressed(Keys.Enter) || kb.IsKeyPressed(Keys.Space))
         {
+            bool hasSave = RangedrifterClone.Core.SaveSystem.HasSave();
             switch (_selected)
             {
-                case 0: GameEngine.Instance.State = GameState.CharacterCreation; break;
-                case 1: _page = Page.HowToPlay;  Render();                       break;
-                case 2: _page = Page.About;       Render();                      break;
-                case 3: _page = Page.Donate;      Render();                      break;
-                case 4: _page = Page.Community;   Render();                      break;
-                case 5: GameEngine.Instance.State = GameState.Settings;          break;
-                case 6: Environment.Exit(0);                                     break;
+                case 0: // Continue
+                    if (hasSave)
+                    {
+                        var save = RangedrifterClone.Core.SaveSystem.LoadSave();
+                        if (save != null)
+                        {
+                            GameEngine.Instance.RestoreFromSave(save);
+                        }
+                    }
+                    break;
+                case 1: GameEngine.Instance.State = GameState.CharacterCreation; break;
+                case 2: // Daily Challenge — go to char creation with daily flag
+                    GameEngine.Instance.IsDailyPending = true;
+                    GameEngine.Instance.State = GameState.CharacterCreation;
+                    break;
+                case 3: GameEngine.Instance.State = GameState.Leaderboard;        break;
+                case 4: _page = Page.HowToPlay; Render();                         break;
+                case 5: _page = Page.About;     Render();                         break;
+                case 6: _page = Page.Donate;    Render();                         break;
+                case 7: _page = Page.Community; Render();                         break;
+                case 8: GameEngine.Instance.State = GameState.Settings;           break;
+                case 9: Environment.Exit(0);                                      break;
             }
         }
     }

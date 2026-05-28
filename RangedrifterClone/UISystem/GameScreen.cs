@@ -66,6 +66,14 @@ public class GameScreen : ScreenObject
     private bool _inventoryOpen  = false;
     private int  _invSelectedIdx = 0;
 
+    // Achievement toast
+    private double _toastTimer = 0;
+    private string _toastName  = "";
+    private string _toastDesc  = "";
+    private char   _toastIcon  = '!';
+    private static readonly SadRogue.Primitives.Color ToastGold = new(255, 200, 50);
+    private static readonly SadRogue.Primitives.Color ToastBg   = new(20, 15, 5);
+
     // ── Sidebar palette ──────────────────────────────────────────────────────
     private static readonly Color LabelClr  = new(140, 140, 140);
     private static readonly Color ValueClr  = new(200, 200, 100);
@@ -105,6 +113,17 @@ public class GameScreen : ScreenObject
         _glowTime += delta.TotalSeconds;
         if (_shotTimer         > 0) _shotTimer         -= delta.TotalSeconds;
         if (_incomingShotTimer > 0) _incomingShotTimer -= delta.TotalSeconds;
+        if (_toastTimer        > 0) _toastTimer        -= delta.TotalSeconds;
+
+        // Dequeue next achievement toast
+        if (_toastTimer <= 0 &&
+            GameEngine.Instance.Achievements.TryDequeueToast(out var toast))
+        {
+            _toastName  = toast.Name;
+            _toastDesc  = toast.Desc;
+            _toastIcon  = toast.Icon;
+            _toastTimer = 3.0;
+        }
 
         // Pick up any ranged shot an enemy just fired this turn
         if (GameEngine.Instance.HasEnemyShot)
@@ -162,7 +181,55 @@ public class GameScreen : ScreenObject
             RenderMap();
             if (_inventoryOpen) DrawInventoryOverlay();
             RenderSidebar();
+            if (_toastTimer > 0) DrawAchievementToast();
         }
+    }
+
+    private void DrawAchievementToast()
+    {
+        double fade  = Math.Min(1.0, _toastTimer / 0.4);     // fade in fast
+        double fade2 = Math.Min(1.0, _toastTimer * 2.5);     // fade out last 0.4 s
+        float  f     = (float)Math.Min(fade, fade2);
+
+        int tw  = 36, th = 4;
+        int tx  = (_mapPanel.Width - tw) / 2;
+        int ty  = 2;
+
+        var bg   = Scale(ToastBg,   f);
+        var gold = Scale(ToastGold, f);
+        var gray = Scale(new SadRogue.Primitives.Color(160, 160, 160), f);
+
+        // Box
+        for (int ry = ty; ry < ty + th; ry++)
+        for (int rx = tx; rx < tx + tw; rx++)
+            _mapPanel.SetGlyph(rx, ry, ' ', SadRogue.Primitives.Color.White, bg);
+
+        // Border top/bottom
+        for (int rx = tx + 1; rx < tx + tw - 1; rx++)
+        {
+            _mapPanel.SetGlyph(rx, ty,         '─', gold, bg);
+            _mapPanel.SetGlyph(rx, ty + th - 1, '─', gold, bg);
+        }
+        _mapPanel.SetGlyph(tx,          ty,          '┌', gold, bg);
+        _mapPanel.SetGlyph(tx + tw - 1, ty,          '┐', gold, bg);
+        _mapPanel.SetGlyph(tx,          ty + th - 1, '└', gold, bg);
+        _mapPanel.SetGlyph(tx + tw - 1, ty + th - 1, '┘', gold, bg);
+
+        // Icon + "Achievement Unlocked!"
+        _mapPanel.SetGlyph(tx + 2, ty + 1, _toastIcon, gold, bg);
+        string header = " Achievement Unlocked!";
+        _mapPanel.Print(tx + 3, ty + 1, header, gold, bg);
+
+        // Name + desc
+        string nameStr = _toastName.PadRight(tw - 4);
+        string descStr = _toastDesc.Length > tw - 4 ? _toastDesc[..(tw - 4)] : _toastDesc.PadRight(tw - 4);
+        _mapPanel.Print(tx + 2, ty + 2, nameStr, gray, bg);
+    }
+
+    private static SadRogue.Primitives.Color Scale(SadRogue.Primitives.Color c, float f)
+    {
+        f = Math.Clamp(f, 0f, 1f);
+        return new SadRogue.Primitives.Color((int)(c.R * f), (int)(c.G * f), (int)(c.B * f));
     }
 
     // ── Top-down camera ───────────────────────────────────────────────────────

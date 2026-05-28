@@ -18,11 +18,29 @@ public class GameEngine
     public GameState     State          { get; set; } = GameState.Loading;
     public int           CurrentFloor   { get; private set; } = 1;
 
+    // ── Run statistics (serialised into save / score record) ──────────────
+    public int  RunSeed          { get; private set; }
+    public bool IsDailyChallenge { get; private set; }
+    public int  KillCount        { get; private set; }
+    public int  AbilityUseCount  { get; private set; }
+    public int  TotalRangedShots { get; private set; }
+    public int  MinHpReached     { get; private set; } = int.MaxValue;
+    public bool BossKilled       { get; private set; }
+
+    // Achievement system — lives for the lifetime of the process
+    public AchievementSystem Achievements { get; } = new();
+
+    // Set by MainMenuScreen when the user picks Daily Challenge before char creation
+    public bool IsDailyPending { get; set; }
+
     // Set by EndTurn when a ranged enemy just fired; cleared by GameScreen after pickup
     public bool HasEnemyShot { get; private set; }
     public int  EnemyShotX   { get; private set; }
     public int  EnemyShotY   { get; private set; }
     public void ClearEnemyShot() => HasEnemyShot = false;
+
+    // Enemy count snapshot used for kill-counting inside EndTurn
+    private int _enemiesBeforeTurn;
 
     // Systems
     private MovementSystem?     _movement;
@@ -66,17 +84,21 @@ public class GameEngine
     }
 
     // ── New Game / Class selection ────────────────────────────────────────
-    public void StartNewGame(string classId = "warrior")
+    public void StartNewGame(string classId = "warrior", int? forceSeed = null, bool daily = false)
     {
+        ResetRunStats();
+        IsDailyChallenge = daily;
+        RunSeed = forceSeed ?? new Random().Next(1, int.MaxValue);
+
         // Clear world
         foreach (var e in EntityManager.AllEntities.ToList())
             EntityManager.DestroyEntity(e);
         _floorCache.Clear();
         CurrentFloor = 1;
 
-        // Generate first floor
+        // Generate first floor with deterministic seed
         var theme = DungeonGenerator.ThemeForFloor(1);
-        var gen   = new DungeonGenerator(200, 200, 1, theme);
+        var gen   = new DungeonGenerator(200, 200, 1, theme, FloorSeed(1));
         CurrentMap = gen.Generate();
         _floorCache[1] = CurrentMap;
 
@@ -386,6 +408,7 @@ public class GameEngine
     public void ProcessPlayerTurn(int dx, int dy)
     {
         if (State != GameState.Playing || CurrentMap == null) return;
+        _enemiesBeforeTurn = EntityManager.GetEntitiesWith<AIComponent>().Count();
 
         var fx = EntityManager.GetComponent<StatusEffectComponent>(PlayerEntity);
         if (fx != null && fx.IsCrowdControlled)
@@ -414,11 +437,118 @@ public class GameEngine
         EndTurn();
     }
 
+    public void StartDailyChallenge(string classId = "warrior")
+    {
+        int seed = DateOnly.FromDateTime(DateTime.Today).DayNumber;
+        StartNewGame(classId, forceSeed: seed, daily: true);
+    }
+
+    public void RestoreFromSave(SaveData save)
+    {
+        ResetRunStats();
+        RunSeed          = save.RunSeed;
+        IsDailyChallenge = save.IsDailyChallenge;
+        KillCount        = save.KillCount;
+        AbilityUseCount  = save.AbilityUseCount;
+        TotalRangedShots = save.TotalRangedShots;
+
+        foreach (var e in EntityManager.AllEntities.ToList())
+            EntityManager.DestroyEntity(e);
+        _floorCache.Clear();
+        CurrentFloor = save.CurrentFloor;
+
+        var theme = DungeonGenerator.ThemeForFloor(CurrentFloor);
+        var gen   = new DungeonGenerator(200, 200, CurrentFloor, theme, FloorSeed(CurrentFloor));
+        CurrentMap = gen.Generate();
+        _floorCache[CurrentFloor] = CurrentMap;
+
+        var classDef = DataLoader.ClassDefinitions
+            .FirstOrDefault(c => c.Id == save.ClassId) ?? DataLoader.ClassDefinitions[0];
+        PlayerEntity = CreatePlayer(
+            new SadRogue.Primitives.Point(save.Player.X, save.Player.Y), classDef);
+
+        // Override class-default stats with saved values
+        var fighter = EntityManager.GetComponent<FighterComponent>(PlayerEntity)!;
+        fighter.Hp = save.Player.Hp; fighter.MaxHp = save.Player.MaxHp;
+        fighter.Strength = save.Player.Strength; fighter.Defense = save.Player.Defense;
+
+        var mana = EntityManager.GetComponent<ManaComponent>(PlayerEntity);
+        if (mana != null) { mana.Mana = save.Player.Mana; mana.MaxMana = save.Player.MaxMana; }
+
+        var xp = EntityManager.GetComponent<ExperienceComponent>(PlayerEntity);
+        if (xp != null)
+        {
+            xp.Level = save.Player.Level;
+            xp.Experience   = save.Player.Experience;
+            xp.NextLevelExp = save.Player.NextLevelExp;
+        }
+
+        var status = EntityManager.GetComponent<StatusComponent>(PlayerEntity);
+        if (status != null) status.Turn = save.TurnCount;
+
+        // Restore inventory from item IDs
+        var inv = EntityManager.GetComponent<InventoryComponent>(PlayerEntity)!;
+        inv.Items.Clear();
+        foreach (var is_ in save.Player.Inventory)
+        {
+            var def = DataLoader.ItemDefinitions.FirstOrDefault(d => d.Id == is_.ItemId);
+            if (def == null) continue;
+            inv.Items.Add(new InventoryEntry
+            {
+                ItemId = def.Id, Name = def.Name, Category = def.Category,
+                Count = is_.Count, Value = def.Value,
+                Glyph = def.Glyph, Color = def.Color,
+                BonusDamage = def.BonusDamage, BonusDefense = def.BonusDefense,
+                BonusMaxHp = def.BonusMaxHp, BonusMaxMana = def.BonusMaxMana,
+                UseEffect = def.UseEffect
+            });
+        }
+
+        // Restore equipment
+        var equip = EntityManager.GetComponent<EquipmentSlotComponent>(PlayerEntity)!;
+        equip.Weapon = MakeEquipEntry(save.Player.Weapon, EquipSlot.Weapon);
+        equip.Armor  = MakeEquipEntry(save.Player.Armor,  EquipSlot.Armor);
+        equip.Shield = MakeEquipEntry(save.Player.Shield, EquipSlot.Shield);
+        equip.Ring   = MakeEquipEntry(save.Player.Ring,   EquipSlot.Ring);
+        equip.Amulet = MakeEquipEntry(save.Player.Amulet, EquipSlot.Amulet);
+        _equipment!.RecalculateStats(PlayerEntity);
+
+        SpawnEntities(CurrentMap);
+        _fov!.ComputeFov(CurrentMap, PlayerEntity, 9);
+        State = GameState.Playing;
+
+        MessageLog.Add($"Run restored — Floor {CurrentFloor}  Seed #{RunSeed}",
+            SadRogue.Primitives.Color.Cyan);
+    }
+
+    private EquipmentEntry? MakeEquipEntry(string? itemId, EquipSlot slot)
+    {
+        if (string.IsNullOrEmpty(itemId)) return null;
+        var def = DataLoader.ItemDefinitions.FirstOrDefault(d => d.Id == itemId);
+        if (def == null) return null;
+        return new EquipmentEntry
+        {
+            ItemId = def.Id, Name = def.Name, Slot = slot,
+            BonusDamage = def.BonusDamage, BonusDefense = def.BonusDefense,
+            BonusMaxHp = def.BonusMaxHp, BonusMaxMana = def.BonusMaxMana,
+            Glyph = def.Glyph, Color = def.Color
+        };
+    }
+
+    private void ResetRunStats()
+    {
+        KillCount = AbilityUseCount = TotalRangedShots = 0;
+        MinHpReached = int.MaxValue;
+        BossKilled = false;
+    }
+
+    private int FloorSeed(int floor) => RunSeed ^ (floor * 7919);
+
     public void UseAbility(int index, int dx = 0, int dy = 0)
     {
         if (State != GameState.Playing || CurrentMap == null) return;
         bool acted = _ability!.UseAbility(PlayerEntity, index, CurrentMap, _combat!, dx, dy);
-        if (acted) EndTurn();
+        if (acted) { AbilityUseCount++; EndTurn(); }
     }
 
     public void ProcessAction(PlayerAction action)
@@ -554,28 +684,37 @@ public class GameEngine
     {
         if (CurrentMap == null) return;
 
-        // Status effect tick
+        // ── Kill accounting ───────────────────────────────────────────────
+        int enemiesNow = EntityManager.GetEntitiesWith<AIComponent>().Count();
+        int newKills   = Math.Max(0, _enemiesBeforeTurn - enemiesNow);
+        KillCount += newKills;
+        _enemiesBeforeTurn = enemiesNow;
+
+        // ── Status effect tick ────────────────────────────────────────────
         _statusFx!.ProcessAll();
 
-        // Mana regen
+        // ── Mana regen ────────────────────────────────────────────────────
         EntityManager.GetComponent<ManaComponent>(PlayerEntity)?.TickRegen();
 
-        // Check player death
+        // ── Check player death ────────────────────────────────────────────
         var fighter = EntityManager.GetComponent<FighterComponent>(PlayerEntity);
         if (fighter != null && fighter.Hp <= 0)
         {
-            State = GameState.GameOver;
-            MessageLog.Add("You have died! Press R to restart.", SadRogue.Primitives.Color.Red);
+            RecordGameOver("Slain in combat");
             return;
         }
 
-        // Ability cooldown tick
+        // Track min HP
+        if (fighter != null)
+            MinHpReached = Math.Min(MinHpReached, fighter.Hp);
+
+        // ── Ability cooldown tick ─────────────────────────────────────────
         EntityManager.GetComponent<AbilityComponent>(PlayerEntity)?.TickCooldowns();
 
-        // Update FOV
+        // ── FOV ───────────────────────────────────────────────────────────
         _fov!.ComputeFov(CurrentMap, PlayerEntity, 9);
 
-        // AI turns
+        // ── AI turns ──────────────────────────────────────────────────────
         _ai!.ProcessTurns(CurrentMap, PlayerEntity, _combat!, _movement!);
         if (_ai.RangedShotsFired.Count > 0)
         {
@@ -584,18 +723,62 @@ public class GameEngine
             HasEnemyShot = true;
         }
 
-        // Check player death again after AI
+        // ── Check player death after AI ───────────────────────────────────
         fighter = EntityManager.GetComponent<FighterComponent>(PlayerEntity);
         if (fighter != null && fighter.Hp <= 0)
         {
-            State = GameState.GameOver;
-            MessageLog.Add("You have died! Press R to restart.", SadRogue.Primitives.Color.Red);
+            RecordGameOver("Slain in combat");
             return;
         }
 
-        // Turn counter
+        // ── Turn counter ──────────────────────────────────────────────────
         var status = EntityManager.GetComponent<StatusComponent>(PlayerEntity);
         if (status != null) status.Turn++;
+
+        // ── Achievement checks ────────────────────────────────────────────
+        var xp    = EntityManager.GetComponent<ExperienceComponent>(PlayerEntity);
+        var inv   = EntityManager.GetComponent<InventoryComponent>(PlayerEntity);
+        var equip = EntityManager.GetComponent<EquipmentSlotComponent>(PlayerEntity);
+        int equippedSlots = (equip?.Weapon  != null ? 1 : 0)
+                          + (equip?.Armor   != null ? 1 : 0)
+                          + (equip?.Shield  != null ? 1 : 0)
+                          + (equip?.Ring    != null ? 1 : 0)
+                          + (equip?.Amulet  != null ? 1 : 0);
+        Achievements.CheckAll(
+            kills:          KillCount,
+            floor:          CurrentFloor,
+            level:          xp?.Level ?? 1,
+            abilities:      AbilityUseCount,
+            turns:          status?.Turn ?? 0,
+            invCount:       inv?.Items.Count ?? 0,
+            equippedSlots:  equippedSlots,
+            minHp:          MinHpReached == int.MaxValue ? (fighter?.Hp ?? 1) : MinHpReached,
+            rangedShots:    TotalRangedShots,
+            bossKilled:     BossKilled,
+            dailyComplete:  false   // set to true by feature system when boss dies on daily
+        );
+    }
+
+    private void RecordGameOver(string cause)
+    {
+        State = GameState.GameOver;
+        MessageLog.Add("You have died! Press R to restart.", SadRogue.Primitives.Color.Red);
+        var status = EntityManager.GetComponent<StatusComponent>(PlayerEntity);
+        var cls    = EntityManager.GetComponent<ClassComponent>(PlayerEntity);
+        int score  = KillCount * 15 + CurrentFloor * 200 + (status?.Turn ?? 0) / 5;
+        SaveSystem.AddScore(new ScoreRecord
+        {
+            PlayerClass  = cls?.ClassName ?? "Unknown",
+            Score        = score,
+            Floor        = CurrentFloor,
+            KillCount    = KillCount,
+            TurnCount    = status?.Turn ?? 0,
+            IsDaily      = IsDailyChallenge,
+            DailySeed    = IsDailyChallenge ? RunSeed : 0,
+            Date         = DateOnly.FromDateTime(DateTime.Today).ToString(),
+            Cause        = cause,
+        });
+        SaveSystem.DeleteSave();
     }
 
     // ── Ranged shot ───────────────────────────────────────────────────────
@@ -610,6 +793,8 @@ public class GameEngine
     {
         if (State != GameState.Playing || CurrentMap == null)
             return (false, 0, 0);
+        TotalRangedShots++;
+        _enemiesBeforeTurn = EntityManager.GetEntitiesWith<AIComponent>().Count();
 
         var pos = EntityManager.GetComponent<PositionComponent>(PlayerEntity);
         if (pos == null) return (false, 0, 0);
@@ -657,6 +842,7 @@ public class GameEngine
     {
         _floorCache[CurrentFloor] = CurrentMap!;
         CurrentFloor = targetFloor;
+        SaveSystem.SaveGame(this);        // auto-save on descent
         LoadOrGenerateFloor(targetFloor, fromAbove: true);
     }
 
@@ -669,7 +855,6 @@ public class GameEngine
 
     private void LoadOrGenerateFloor(int floor, bool fromAbove)
     {
-        // Remove all non-player entities from current state
         foreach (var e in EntityManager.AllEntities.Where(e => e != PlayerEntity).ToList())
             EntityManager.DestroyEntity(e);
 
@@ -680,14 +865,13 @@ public class GameEngine
         else
         {
             var theme = DungeonGenerator.ThemeForFloor(floor);
-            var gen   = new DungeonGenerator(200, 200, floor, theme);
+            var gen   = new DungeonGenerator(200, 200, floor, theme, FloorSeed(floor));
             CurrentMap = gen.Generate();
             _floorCache[floor] = CurrentMap;
             SpawnEntities(CurrentMap);
         }
 
-        // Place player at appropriate stairs
-        var pos = EntityManager.GetComponent<PositionComponent>(PlayerEntity)!;
+        var pos  = EntityManager.GetComponent<PositionComponent>(PlayerEntity)!;
         var dest = fromAbove ? CurrentMap.StartPosition : CurrentMap.StairsDownPos;
         pos.X = dest.X; pos.Y = dest.Y;
 
@@ -696,6 +880,6 @@ public class GameEngine
     }
 }
 
-public enum GameState   { Loading, MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings }
+public enum GameState   { Loading, MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings, Leaderboard }
 public enum PlayerAction { MoveNorth, MoveSouth, MoveEast, MoveWest,
     MoveNE, MoveNW, MoveSE, MoveSW, PickUp, Wait, UseItem, OpenInventory, CloseInventory }
