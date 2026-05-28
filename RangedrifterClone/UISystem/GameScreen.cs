@@ -429,7 +429,7 @@ public class GameScreen : ScreenObject
             _zBuffer[col] = perpDist;
 
             // ── Flat-shaded wall color: face direction + fog ──────────────
-            float distFade = (float)Math.Max(0.05, 1.0 - perpDist / 20.0);
+            float distFade = (float)Math.Max(0.12, 1.0 - perpDist / 22.0);
             float faceMul  = ySide ? 0.58f : 1.0f;
             float fi       = distFade * faceMul;
 
@@ -1217,7 +1217,7 @@ public class GameScreen : ScreenObject
             int leftC   = centCol - sprW / 2;
             int rightC  = centCol + sprW / 2;
 
-            float fade = (float)Math.Max(0.07, 1.0 - txD / 14.0);
+            float fade = (float)Math.Max(0.15, 1.0 - txD / 16.0);
             var spClr = new Color(
                 (byte)(sp.Clr.R * fade), (byte)(sp.Clr.G * fade), (byte)(sp.Clr.B * fade));
 
@@ -1795,21 +1795,26 @@ public class GameScreen : ScreenObject
                     Color floorNear, Color floorFar)
         FpThemePalette(MapTheme theme) => theme switch
     {
-        MapTheme.Cave   => (new Color( 95,  88,  72), new Color( 65,  60,  50),
-                            new Color(  8,  10,  16), new Color(  3,   3,   6),
-                            new Color( 10,   8,   5), new Color(  4,   3,   2)),
-        MapTheme.Crypt  => (new Color(115, 108, 130), new Color( 80,  75,  95),
-                            new Color(  8,   5,  16), new Color(  3,   2,   7),
-                            new Color(  6,   5,  10), new Color(  3,   2,   5)),
-        MapTheme.Mines  => (new Color( 82,  72,  48), new Color( 58,  50,  34),
-                            new Color(  3,   3,   3), new Color(  1,   1,   1),
-                            new Color(  8,   6,   4), new Color(  3,   2,   2)),
-        MapTheme.Forest => (new Color( 68,  88,  45), new Color( 50,  65,  35),
-                            new Color( 12,  18,  28), new Color(  5,   8,  14),
-                            new Color( 14,  20,   8), new Color(  6,   9,   3)),
-        _               => (new Color(152, 136, 102), new Color(108,  96,  72),
-                            new Color(  6,   6,  18), new Color(  3,   3,   8),
-                            new Color( 12,  10,   6), new Color(  5,   4,   3)),
+        // Cave: grey-brown stone walls, dark rocky ceiling, warm floor
+        MapTheme.Cave   => (new Color(110, 100,  82), new Color( 74,  67,  55),
+                            new Color( 18,  20,  32), new Color(  6,   6,  12),
+                            new Color( 30,  24,  16), new Color( 12,   9,   6)),
+        // Crypt: pale violet stone, deep purple void ceiling, cold floor
+        MapTheme.Crypt  => (new Color(124, 116, 140), new Color( 85,  80, 102),
+                            new Color( 24,  14,  42), new Color(  8,   5,  18),
+                            new Color( 22,  16,  34), new Color(  8,   6,  14)),
+        // Mines: dark earth walls, coal-black ceiling, gritty floor
+        MapTheme.Mines  => (new Color( 96,  84,  56), new Color( 64,  56,  38),
+                            new Color( 14,  12,  16), new Color(  5,   4,   6),
+                            new Color( 24,  18,  11), new Color(  9,   7,   4)),
+        // Forest: green-brown trees, dark-blue night sky, green earth floor
+        MapTheme.Forest => (new Color( 74,  98,  50), new Color( 54,  70,  36),
+                            new Color( 22,  40,  70), new Color(  8,  18,  44),
+                            new Color( 36,  52,  20), new Color( 14,  22,   7)),
+        // Default dungeon: warm tan stone, dark-blue void, warm stone floor
+        _               => (new Color(160, 145, 108), new Color(110,  98,  74),
+                            new Color( 28,  32,  54), new Color(  8,  10,  22),
+                            new Color( 54,  44,  30), new Color( 18,  14,   9)),
     };
 
     private static Color FpC(int r, int g, int b, float fi)
