@@ -419,6 +419,9 @@ public class GameScreen : ScreenObject
 
         // ── Mini-map ───────────────────────────────────────────────────────
         DrawFpMiniMap(map, pos);
+
+        // ── Player body (drawn last so it's always on top) ─────────────────
+        DrawPlayerBody();
     }
 
     // ── Muzzle flash + impact flash ───────────────────────────────────────────
@@ -485,6 +488,144 @@ public class GameScreen : ScreenObject
             }
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PLAYER BODY OVERLAY  (FP mode — drawn at bottom of map panel)
+    // ─────────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Draws a class-specific ASCII-art character body at the bottom centre of
+    /// the first-person view panel, mimicking the "you can see your own body"
+    /// look of old dungeon-crawlers (Eye of the Beholder, Dungeon Master, etc.).
+    ///
+    /// Layout: the figure is 8 rows tall, ~11 cells wide, centred at MapW/2.
+    /// The whole figure bobs 1 row on a slow sine wave (breathing animation).
+    /// The equipped weapon glyph drives the weapon colour.
+    /// </summary>
+    private void DrawPlayerBody()
+    {
+        var em     = GameEngine.Instance.EntityManager;
+        var player = GameEngine.Instance.PlayerEntity;
+        var rend   = em.GetComponent<RenderComponent>(player);
+        var cls    = em.GetComponent<ClassComponent>(player);
+        var equip  = em.GetComponent<EquipmentSlotComponent>(player);
+        if (rend == null) return;
+
+        Color clr   = rend.Foreground;
+        Color dim   = Dim(clr, 0.55f);
+        Color dark  = Dim(clr, 0.28f);
+        Color steel = new Color(160, 165, 178);   // armour metal
+        Color dstl  = new Color( 88,  92, 102);   // dark metal / shadow
+        Color wclr  = equip?.Weapon?.Color ?? new Color(200, 190, 80);
+
+        // Breathing bob: body rises 1 row at the peak of a 1.6 Hz sine wave
+        bool bUp = Math.Sin(_glowTime * 1.6) > 0.4;
+        int  cx  = MapW / 2;                      // = 29, horizontal centre
+        int  cy  = MapH - 2 - (bUp ? 1 : 0);     // = 34 or 35
+
+        // Local helper: place a glyph relative to (cx, cy), clipped to panel
+        void P(int dx, int dy, char g, Color fg)
+        {
+            int sx = cx + dx, sy = cy + dy;
+            if (sx >= 1 && sx < MapW - 1 && sy >= 1 && sy < MapH - 1)
+                _mapPanel.SetGlyph(sx, sy, g, fg, Color.Black);
+        }
+
+        var pClass = cls?.Class ?? PlayerClass.Warrior;
+        switch (pClass)
+        {
+            // ── WARRIOR ─────────────────────────────────────────────────────
+            // Sword arm raised upper-right; heavy plate armour; wide stance.
+            case PlayerClass.Warrior:
+                // Sword (raised diagonally)
+                P(+5, -7, '/', wclr); P(+4, -6, '/', wclr); P(+3, -5, '/', wclr);
+                P(+2, -4, '+', wclr);           // crossguard
+                // Helmet + face
+                P(-1, -5, '[', steel); P(0, -5, '\x01', clr); P(+1, -5, ']', steel);
+                // Pauldrons (shoulder guards)
+                P(-3, -4, '<', steel); P(-2, -4, '[', steel);
+                P(-1, -4, '▄', dstl); P(0, -4, '▄', dstl); P(+1, -4, '▄', dstl);
+                P(+2, -4, ']', steel); P(+3, -4, '>', steel);
+                // Chest + belt
+                P(-2, -3, '|', dark); P(-1, -3, '═', dstl);
+                P(0,  -3, '╪', dstl); P(+1, -3, '═', dstl); P(+2, -3, '|', dark);
+                // Waist / tassets
+                P(-2, -2, '/', dark); P(-1, -2, '[', dstl);
+                P(0,  -2, '─', dstl); P(+1, -2, ']', dstl); P(+2, -2, '\\', dark);
+                // Upper legs (greaves)
+                P(-1, -1, '[', dim);  P(0, -1, ' ', clr);  P(+1, -1, ']', dim);
+                // Boots
+                P(-2, 0, '/', dstl); P(-1, 0, '_', dstl);
+                P(+1, 0, '_', dstl); P(+2, 0, '\\', dstl);
+                break;
+
+            // ── MAGE ────────────────────────────────────────────────────────
+            // Floating staff + orb; flowing robes; slim silhouette.
+            case PlayerClass.Mage:
+                var orbClr  = new Color(170, 150, 255);
+                var staffClr = new Color(160, 125, 65);
+                // Staff + orb (floats because it's animated via bob)
+                P(+4, -8, '*', orbClr);
+                P(+3, -7, '|', staffClr); P(+3, -6, '|', staffClr);
+                P(+2, -5, '/', staffClr);
+                // Head in cowl
+                P(-1, -5, '(', dim); P(0, -5, '\x01', clr); P(+1, -5, ')', dim);
+                // Robe shoulders
+                P(-2, -4, '(', dim);  P(-1, -4, '|', dim);
+                P(0,  -4, '|', dim);  P(+1, -4, '|', dim);  P(+2, -4, ')', dim);
+                // Robe body
+                P(-2, -3, '|', dim);  P(-1, -3, '|', dark);
+                P(0,  -3, '|', dark); P(+1, -3, '|', dark); P(+2, -3, '|', dim);
+                P(-2, -2, '(', dark); P(-1, -2, '|', dark);
+                P(0,  -2, '|', dark); P(+1, -2, '|', dark); P(+2, -2, ')', dark);
+                // Robe hem (wider + flared)
+                P(-3, -1, '\\', dark); P(-2, -1, '~', dim); P(-1, -1, '~', dim);
+                P(0,  -1, '~', dim);   P(+1, -1, '~', dim); P(+2, -1, '~', dim);
+                P(+3, -1, '/', dark);
+                P(-2, 0, '~', dark); P(-1, 0, '~', dark);
+                P(0,  0, '~', dark);  P(+1, 0, '~', dark); P(+2, 0, '~', dark);
+                break;
+
+            // ── ROGUE ────────────────────────────────────────────────────────
+            // Twin daggers; hooded; slim cloaked form; crouched stance.
+            case PlayerClass.Rogue:
+                // Left dagger
+                P(-5, -6, '+', wclr); P(-4, -6, '-', wclr); P(-4, -5, '\\', wclr);
+                // Right dagger
+                P(+5, -6, '+', wclr); P(+4, -6, '-', wclr); P(+4, -5, '/', wclr);
+                // Hooded head
+                P(-1, -5, ',', dim); P(0, -5, '\x01', clr); P(+1, -5, ',', dim);
+                // Cloak — upper
+                P(-2, -4, '{', dim);  P(-1, -4, '|', dark);
+                P(0,  -4, '|', dark); P(+1, -4, '|', dark); P(+2, -4, '}', dim);
+                // Cloak — mid
+                P(-3, -3, '{', dark); P(-2, -3, '|', dark);
+                P(-1, -3, '|', dark); P(0,  -3, '|', dark);
+                P(+1, -3, '|', dark); P(+2, -3, '|', dark); P(+3, -3, '}', dark);
+                // Cloak — lower (flared)
+                P(-3, -2, '/', dark); P(-2, -2, '|', dark);
+                P(-1, -2, '|', dark); P(0,  -2, '|', dark);
+                P(+1, -2, '|', dark); P(+2, -2, '|', dark); P(+3, -2, '\\', dark);
+                // Crouched legs (Rogue leans forward)
+                P(-1, -1, '/', dim);  P(+1, -1, '\\', dim);
+                P(-1,  0, '/', dark); P(+1,  0, '\\', dark);
+                break;
+        }
+
+        // Ground shadow line at the very bottom row — subtle dark band
+        for (int gx = cx - 5; gx <= cx + 5; gx++)
+        {
+            int sy = cy + 1;
+            if (gx >= 1 && gx < MapW - 1 && sy >= 1 && sy < MapH - 1)
+            {
+                float dist = MathF.Abs(gx - cx) / 5f;
+                byte  alpha = (byte)(35 - (int)(30 * dist));
+                _mapPanel.SetBackground(gx, sy, new Color(alpha, alpha, alpha));
+            }
+        }
+    }
+
+    private static Color Dim(Color c, float f) =>
+        new Color((byte)(c.R * f), (byte)(c.G * f), (byte)(c.B * f));
 
     // ═════════════════════════════════════════════════════════════════════════
     // SPRITE PROJECTION
