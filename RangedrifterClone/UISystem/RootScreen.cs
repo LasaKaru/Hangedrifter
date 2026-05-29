@@ -9,20 +9,21 @@ namespace RangedrifterClone.UISystem;
 /// </summary>
 public class RootScreen : ScreenObject
 {
+    private StudioIntroScreen?        _studioIntro;
     private LoadingScreen?            _loading;
     private MainMenuScreen?           _mainMenu;
     private CharacterCreationScreen?  _charCreate;
     private GameScreen?               _gameScreen;
     private SettingsScreen?           _settings;
     private LeaderboardScreen?        _leaderboard;
-    private GameState                 _lastState = GameState.Loading;
+    private GameState                 _lastState = GameState.StudioIntro;
 
     public RootScreen()
     {
-        _loading = new LoadingScreen();
-        Children.Add(_loading);
-        _loading.IsVisible = true;
-        _loading.IsFocused = true;
+        _studioIntro = new StudioIntroScreen();
+        Children.Add(_studioIntro);
+        _studioIntro.IsVisible = true;
+        _studioIntro.IsFocused = true;
     }
 
     public override void Update(TimeSpan delta)
@@ -36,6 +37,16 @@ public class RootScreen : ScreenObject
 
         switch (state)
         {
+            case GameState.StudioIntro:
+                if (_studioIntro == null)
+                {
+                    _studioIntro = new StudioIntroScreen();
+                    Children.Add(_studioIntro);
+                }
+                _studioIntro.IsVisible = true;
+                _studioIntro.IsFocused = true;
+                break;
+
             case GameState.Loading:
                 if (_loading == null)
                 {
@@ -112,6 +123,7 @@ public class RootScreen : ScreenObject
 
     private void HideAll()
     {
+        if (_studioIntro != null) _studioIntro.IsVisible = false;
         if (_loading     != null) _loading.IsVisible     = false;
         if (_mainMenu    != null) _mainMenu.IsVisible    = false;
         if (_settings    != null) _settings.IsVisible    = false;

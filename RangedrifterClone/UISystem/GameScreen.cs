@@ -1266,8 +1266,9 @@ public class GameScreen : ScreenObject
             if (isEnemy)
             {
                 var (th, tb, tl, hClr) = GetEnemySpriteStyle(e);
+                int bobV = (int)(Math.Sin(_glowTime * 2.5 + p.X * 0.7 + p.Y * 1.3) * 1.5);
                 sprites.Add(new SpriteInfo(dx * dx + dy * dy, p.X + 0.5, p.Y + 0.5,
-                    th, tb, tl, hClr, 1.0f, 0.55f, e));
+                    th, tb, tl, hClr, 1.4f, 0.65f, e, bobV));
             }
             else if (feat != null)
             {
@@ -1345,7 +1346,12 @@ public class GameScreen : ScreenObject
             int leftC   = centCol - sprW / 2;
             int rightC  = centCol + sprW / 2;
 
-            float fade = (float)Math.Max(0.15, 1.0 - txD / 16.0);
+            bool isEnemySprite = sp.EntityId.IsValid &&
+                em.GetComponent<AIComponent>(sp.EntityId) != null;
+
+            float fade = isEnemySprite
+                ? (float)Math.Max(0.28, 1.0 - txD / 20.0)
+                : (float)Math.Max(0.15, 1.0 - txD / 16.0);
             var spClr = new Color(
                 (byte)(sp.Clr.R * fade), (byte)(sp.Clr.G * fade), (byte)(sp.Clr.B * fade));
 
@@ -1358,9 +1364,6 @@ public class GameScreen : ScreenObject
                 if (eFighter != null)
                     DrawEnemyHpBar(centCol, topY - 2, sprW, eFighter, txD);
             }
-
-            bool isEnemySprite = sp.EntityId.IsValid &&
-                em.GetComponent<AIComponent>(sp.EntityId) != null;
 
             for (int stripe = leftC; stripe <= rightC; stripe++)
             {

@@ -15,7 +15,7 @@ public class GameEngine
     public Entity        PlayerEntity   { get; private set; }
     public MessageLog    MessageLog     { get; } = new();
     public DataLoader    DataLoader     { get; } = new();
-    public GameState     State          { get; set; } = GameState.Loading;
+    public GameState     State          { get; set; } = GameState.StudioIntro;
     public int           CurrentFloor   { get; private set; } = 1;
 
     // ── Run statistics (serialised into save / score record) ──────────────
@@ -880,6 +880,6 @@ public class GameEngine
     }
 }
 
-public enum GameState   { Loading, MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings, Leaderboard }
+public enum GameState   { StudioIntro, Loading, MainMenu, CharacterCreation, Playing, Inventory, GameOver, Settings, Leaderboard }
 public enum PlayerAction { MoveNorth, MoveSouth, MoveEast, MoveWest,
     MoveNE, MoveNW, MoveSE, MoveSW, PickUp, Wait, UseItem, OpenInventory, CloseInventory }
