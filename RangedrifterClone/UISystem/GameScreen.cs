@@ -78,6 +78,26 @@ public class GameScreen : ScreenObject
     private double _meleeHitTimer = 0;
     private int    _prevPlayerHp  = -1;
 
+    // ── Feature 1: enemy death dissolve particles ─────────────────────────
+    private sealed class DeathPart
+    {
+        public double WX, WY, VX, VY;
+        public char   Glyph;
+        public Color  Color;
+        public float  Life; // 1 → 0
+    }
+    private readonly List<DeathPart>                         _deathParts   = new();
+    private readonly Dictionary<Entity, (double wx, double wy)> _enemyLastPos = new();
+    private HashSet<Entity>                                  _prevEnemySet = new();
+
+    // ── Feature 2: moving projectile trail ────────────────────────────────
+    private double _projWX, _projWY, _projVX, _projVY;
+    private float  _projLife;
+    private bool   _projActive;
+
+    // ── Feature 7: ambient sound timer ────────────────────────────────────
+    private double _ambientTimer = 5.0;
+
     // ── Sidebar palette ──────────────────────────────────────────────────────
     private static readonly Color LabelClr  = new(140, 140, 140);
     private static readonly Color ValueClr  = new(200, 200, 100);
@@ -137,6 +157,64 @@ public class GameScreen : ScreenObject
             _incomingShotFromX = GameEngine.Instance.EnemyShotX;
             _incomingShotFromY = GameEngine.Instance.EnemyShotY;
             GameEngine.Instance.ClearEnemyShot();
+            MusicPlayer.PlayGrowl();
+        }
+
+        // Ambient dungeon drip
+        if (GameEngine.Instance.State == GameState.Playing)
+        {
+            _ambientTimer -= delta.TotalSeconds;
+            if (_ambientTimer <= 0)
+            {
+                MusicPlayer.PlayAmbientDrip();
+                _ambientTimer = 4.0 + new Random().NextDouble() * 5.0;
+            }
+        }
+
+        // Projectile trail
+        if (_projActive)
+        {
+            _projWX    += _projVX * delta.TotalSeconds;
+            _projWY    += _projVY * delta.TotalSeconds;
+            _projLife  -= (float)(delta.TotalSeconds / 0.22);
+            if (_projLife <= 0) { _projActive = false; }
+            else
+            {
+                var m = GameEngine.Instance.CurrentMap;
+                if (m != null && !m.IsWalkable((int)_projWX, (int)_projWY))
+                    _projActive = false;
+            }
+        }
+
+        // Death dissolve — track enemies, spawn particles on death
+        if (GameEngine.Instance.State == GameState.Playing)
+        {
+            var em  = GameEngine.Instance.EntityManager;
+            var cur = new HashSet<Entity>(em.GetEntitiesWith<AIComponent>());
+            foreach (var e in _prevEnemySet)
+            {
+                if (!cur.Contains(e) && _enemyLastPos.TryGetValue(e, out var lp))
+                    SpawnDeathParticles(lp.wx, lp.wy);
+            }
+            foreach (var e in cur)
+            {
+                var p = em.GetComponent<PositionComponent>(e);
+                if (p != null) _enemyLastPos[e] = (p.X + 0.5, p.Y + 0.5);
+            }
+            _enemyLastPos.Keys.ToList()
+                .Where(k => !cur.Contains(k)).ToList()
+                .ForEach(k => _enemyLastPos.Remove(k));
+            _prevEnemySet = cur;
+        }
+
+        // Advance death particles
+        for (int i = _deathParts.Count - 1; i >= 0; i--)
+        {
+            var p = _deathParts[i];
+            p.Life -= (float)(delta.TotalSeconds / 0.7);
+            p.WX   += p.VX * delta.TotalSeconds;
+            p.WY   += p.VY * delta.TotalSeconds;
+            if (p.Life <= 0) _deathParts.RemoveAt(i);
         }
 
         // Melee hit detection: HP decreased this frame without a ranged shot
@@ -448,7 +526,8 @@ public class GameScreen : ScreenObject
             // ── Flat-shaded wall color: face direction + fog ──────────────
             float distFade = (float)Math.Max(0.12, 1.0 - perpDist / 22.0);
             float faceMul  = ySide ? 0.58f : 1.0f;
-            float fi       = distFade * faceMul;
+            float flicker  = 0.93f + 0.07f * (float)Math.Sin(_glowTime * 7.3 + col * 0.41);
+            float fi       = distFade * faceMul * flicker;
 
             Color wallClr;
             if (doorTiles.Contains((hitX, hitY)))
@@ -521,6 +600,12 @@ public class GameScreen : ScreenObject
         // ── Sprites ───────────────────────────────────────────────────────
         RenderFpSprites(map, pos, posX, posY, dirX, dirY, planX, planY, viewW, viewH, halfH);
 
+        // ── Death dissolve particles ───────────────────────────────────────
+        DrawDeathParticles(posX, posY, dirX, dirY, planX, planY, viewW, viewH);
+
+        // ── Moving projectile trail ────────────────────────────────────────
+        DrawProjectileTrail(posX, posY, dirX, dirY, planX, planY, viewW, viewH);
+
         // ── Horizon glow ──────────────────────────────────────────────────
         if (rend != null)
         {
@@ -541,6 +626,9 @@ public class GameScreen : ScreenObject
                               (byte)(ex.Background.B + (int)(c.B * i))));
             }
         }
+
+        // ── Status effect vignette ────────────────────────────────────────
+        DrawStatusEffectVignette(viewW, viewH);
 
         // ── Muzzle flash ──────────────────────────────────────────────────
         DrawShotFlash(viewW, viewH);
@@ -580,6 +668,12 @@ public class GameScreen : ScreenObject
 
         // ── Player body (drawn last so it's always on top) ─────────────────
         DrawPlayerBody();
+
+        // ── Boss HP bar (always on top, drawn over everything) ────────────
+        DrawBossHpBar(viewW);
+
+        // ── CRT scanline overlay (very last) ──────────────────────────────
+        DrawCrtScanlines(viewH);
     }
 
     // ── Muzzle flash + impact flash ───────────────────────────────────────────
@@ -962,6 +1056,201 @@ public class GameScreen : ScreenObject
             _mapPanel.SetBackground(2,          vy, new Color(d, 0, 0));
             _mapPanel.SetBackground(viewW,      vy, new Color(r, 0, 0));
             _mapPanel.SetBackground(viewW - 1,  vy, new Color(d, 0, 0));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // STATUS EFFECT VIGNETTE
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawStatusEffectVignette(int viewW, int viewH)
+    {
+        var em   = GameEngine.Instance.EntityManager;
+        var sfx  = em.GetComponent<StatusEffectComponent>(GameEngine.Instance.PlayerEntity);
+        if (sfx == null || sfx.Effects.Count == 0) return;
+
+        Color vigClr = Color.Transparent;
+        float vigA   = 0f;
+        foreach (var eff in sfx.Effects)
+        {
+            float pulse = (float)(0.4 + 0.6 * Math.Sin(_glowTime * 4.0));
+            (Color c, float a) = eff.Type switch
+            {
+                EffectType.Poisoned
+                or EffectType.Poisoning => (new Color(30, 160, 30),  0.55f * pulse),
+                EffectType.Burning      => (new Color(210, 80,  20), 0.65f * pulse),
+                EffectType.Frozen       => (new Color(60,  120, 220), 0.55f),
+                EffectType.Stunned      => (new Color(200, 200, 200), 0.45f * pulse),
+                EffectType.Blessed      => (new Color(220, 200, 60),  0.32f),
+                EffectType.Cursed       => (new Color(150, 30,  150), 0.50f * pulse),
+                EffectType.Slowed       => (new Color(40,  40,  180), 0.40f * pulse),
+                _                       => (Color.Transparent, 0f),
+            };
+            if (a > vigA) { vigA = a; vigClr = c; }
+        }
+        if (vigA < 0.04f) return;
+
+        byte vr = (byte)(vigClr.R * vigA), vg = (byte)(vigClr.G * vigA), vb = (byte)(vigClr.B * vigA);
+        byte vr2 = (byte)(vr >> 1), vg2 = (byte)(vg >> 1), vb2 = (byte)(vb >> 1);
+        for (int vx = 1; vx <= viewW; vx++)
+        {
+            _mapPanel.SetBackground(vx, 1,          new Color(vr,  vg,  vb));
+            _mapPanel.SetBackground(vx, 2,          new Color(vr2, vg2, vb2));
+            _mapPanel.SetBackground(vx, viewH,      new Color(vr,  vg,  vb));
+            _mapPanel.SetBackground(vx, viewH - 1,  new Color(vr2, vg2, vb2));
+        }
+        for (int vy = 1; vy <= viewH; vy++)
+        {
+            _mapPanel.SetBackground(1,          vy, new Color(vr,  vg,  vb));
+            _mapPanel.SetBackground(2,          vy, new Color(vr2, vg2, vb2));
+            _mapPanel.SetBackground(viewW,      vy, new Color(vr,  vg,  vb));
+            _mapPanel.SetBackground(viewW - 1,  vy, new Color(vr2, vg2, vb2));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // BOSS HP BAR
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawBossHpBar(int viewW)
+    {
+        var em        = GameEngine.Instance.EntityManager;
+        var playerPos = em.GetComponent<PositionComponent>(GameEngine.Instance.PlayerEntity);
+        if (playerPos == null) return;
+
+        Entity bossE  = Entity.None;
+        double bestD  = double.MaxValue;
+        var    curMap = GameEngine.Instance.CurrentMap;
+        if (curMap == null) return;
+
+        foreach (var e in em.GetEntitiesWith<AIComponent, FighterComponent, PositionComponent>())
+        {
+            var ai = em.GetComponent<AIComponent>(e)!;
+            if (ai.Behavior != AIBehavior.Boss) continue;
+            var bp = em.GetComponent<PositionComponent>(e)!;
+            if (!curMap.GetTile(bp.X, bp.Y).IsVisible) continue;
+            double d = Math.Sqrt(Math.Pow(bp.X - playerPos.X, 2) + Math.Pow(bp.Y - playerPos.Y, 2));
+            if (d < bestD) { bestD = d; bossE = e; }
+        }
+        if (!bossE.IsValid) return;
+
+        var f    = em.GetComponent<FighterComponent>(bossE)!;
+        var nm   = em.GetComponent<NameComponent>(bossE)?.Name?.ToUpperInvariant() ?? "BOSS";
+        float pc = f.MaxHpTotal > 0 ? (float)f.Hp / f.MaxHpTotal : 0f;
+        float pu = (float)(0.70 + 0.30 * Math.Sin(_glowTime * 2.5));
+
+        int bx = 2, by2 = 2, bw = viewW - 2;
+        string lbl = $" \x0F {nm}  HP {f.Hp}/{f.MaxHpTotal} ";
+        _mapPanel.Print(bx, by2, lbl[..Math.Min(lbl.Length, bw)],
+            new Color((byte)(255 * pu), 30, 30), new Color(20, 0, 0));
+
+        int filled = (int)(bw * pc);
+        for (int i = 0; i < bw; i++)
+        {
+            bool on = i < filled;
+            char ch = on ? '█' : '░';
+            var fg  = on  ? new Color((byte)(200 * pu), 20, 20)
+                          : new Color(40, 20, 20);
+            _mapPanel.SetGlyph(bx + i, by2 + 1, ch, fg, new Color(10, 0, 0));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // CRT SCANLINES
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawCrtScanlines(int viewH)
+    {
+        for (int sy = 2; sy <= viewH; sy += 2)
+        {
+            for (int sx = 1; sx < MapW - 1; sx++)
+            {
+                var cell = _mapPanel.GetCellAppearance(sx, sy);
+                if (cell == null) continue;
+                var bg = cell.Background;
+                var fg = cell.Foreground;
+                _mapPanel.SetBackground(sx, sy,
+                    new Color((byte)(bg.R * 0.84f), (byte)(bg.G * 0.84f), (byte)(bg.B * 0.84f)));
+                _mapPanel.SetForeground(sx, sy,
+                    new Color((byte)(fg.R * 0.88f), (byte)(fg.G * 0.88f), (byte)(fg.B * 0.88f)));
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // DEATH DISSOLVE PARTICLES
+    // ═════════════════════════════════════════════════════════════════════════
+    private static readonly char[] _deathChars = { '*', '+', '·', '×', '░', '▒', '%', '$' };
+    private static readonly Random _dpRng = new();
+
+    private void SpawnDeathParticles(double wx, double wy)
+    {
+        for (int i = 0; i < 14; i++)
+        {
+            float angle = (float)(_dpRng.NextDouble() * Math.PI * 2);
+            float speed = 0.4f + (float)_dpRng.NextDouble() * 1.4f;
+            _deathParts.Add(new DeathPart
+            {
+                WX    = wx, WY    = wy,
+                VX    = MathF.Cos(angle) * speed,
+                VY    = MathF.Sin(angle) * speed,
+                Glyph = _deathChars[_dpRng.Next(_deathChars.Length)],
+                Color = new Color(
+                    (byte)_dpRng.Next(120, 220),
+                    (byte)_dpRng.Next(20,  80),
+                    (byte)_dpRng.Next(0,   30)),
+                Life  = 1.0f,
+            });
+        }
+    }
+
+    private void DrawDeathParticles(double posX, double posY,
+        double dirX, double dirY, double planX, double planY, int viewW, int viewH)
+    {
+        if (_deathParts.Count == 0) return;
+        double invDet = 1.0 / (planX * dirY - dirX * planY);
+        int halfH = viewH / 2;
+        foreach (var dp in _deathParts)
+        {
+            double dx  = dp.WX - posX, dy = dp.WY - posY;
+            double txD = invDet * ( dirY * dx - dirX * dy);
+            double txH = invDet * (-planY * dx + planX * dy);
+            if (txD < 0.2) continue;
+            int sc = (int)((viewW * 0.5) * (1.0 + txH / txD));
+            int sr = halfH + 1 + (int)(viewH * 0.0 / txD);
+            if (sc < 0 || sc >= viewW || sr < 1 || sr >= MapH - 1) continue;
+            if (txD >= _zBuffer[sc]) continue;
+            float fade = (float)Math.Max(0.1, 1.0 - txD / 12.0);
+            byte  pr   = (byte)(dp.Color.R * dp.Life * fade);
+            byte  pg   = (byte)(dp.Color.G * dp.Life * fade);
+            byte  pb   = (byte)(dp.Color.B * dp.Life * fade);
+            _mapPanel.SetGlyph(sc + 1, sr, dp.Glyph, new Color(pr, pg, pb), Color.Black);
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // PROJECTILE TRAIL
+    // ═════════════════════════════════════════════════════════════════════════
+    private void DrawProjectileTrail(double posX, double posY,
+        double dirX, double dirY, double planX, double planY, int viewW, int viewH)
+    {
+        if (!_projActive) return;
+        double dx  = _projWX - posX, dy = _projWY - posY;
+        double invDet = 1.0 / (planX * dirY - dirX * planY);
+        double txD = invDet * ( dirY * dx - dirX * dy);
+        double txH = invDet * (-planY * dx + planX * dy);
+        if (txD < 0.2) return;
+        int col = (int)((viewW * 0.5) * (1.0 + txH / txD));
+        if (col < 0 || col >= viewW) return;
+        if (txD >= _zBuffer[col]) return;
+        int row = viewH / 2;
+        byte br = (byte)(255 * _projLife), bg = (byte)(200 * _projLife), bb = (byte)(60 * _projLife);
+        _mapPanel.SetGlyph(col + 1, row, '●', new Color(br, bg, bb), Color.Black);
+        // Short tail — draw 3 cells behind along screen column
+        for (int t = 1; t <= 3; t++)
+        {
+            float ta = _projLife * (1f - t * 0.3f);
+            if (ta <= 0) break;
+            byte tc = (byte)(180 * ta);
+            if (col + 1 - t >= 1)
+                _mapPanel.SetGlyph(col + 1 - t, row, '·', new Color(tc, (byte)(tc * 0.6f), 0), Color.Black);
         }
     }
 
@@ -1736,6 +2025,20 @@ public class GameScreen : ScreenObject
         _shotHit   = hit;
         _shotWX    = wx;
         _shotWY    = wy;
+
+        // Launch moving projectile trail
+        var ppos = GameEngine.Instance.EntityManager
+            .GetComponent<PositionComponent>(GameEngine.Instance.PlayerEntity);
+        if (ppos != null)
+        {
+            const double Speed = 14.0;
+            _projWX = ppos.X + 0.5;
+            _projWY = ppos.Y + 0.5;
+            _projVX = Math.Cos(_fpAngle) * Speed;
+            _projVY = Math.Sin(_fpAngle) * Speed;
+            _projLife  = 1.0f;
+            _projActive = true;
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1840,33 +2143,46 @@ public class GameScreen : ScreenObject
         {
             // Q / E strafe
             if (keyboard.IsKeyPressed(Keys.Q))
-            { var (dx, dy) = FpAngleToDir(_fpAngle - Math.PI * 0.5); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+            { var (dx, dy) = FpAngleToDir(_fpAngle - Math.PI * 0.5); MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
             if (keyboard.IsKeyPressed(Keys.E) && !_equipMode)
-            { var (dx, dy) = FpAngleToDir(_fpAngle + Math.PI * 0.5); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+            { var (dx, dy) = FpAngleToDir(_fpAngle + Math.PI * 0.5); MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
 
             if (keyboard.IsKeyPressed(Keys.Left)  || keyboard.IsKeyPressed(Keys.NumPad4))
             { _fpAngle -= 0.15; return true; }
             if (keyboard.IsKeyPressed(Keys.Right) || keyboard.IsKeyPressed(Keys.NumPad6))
             { _fpAngle += 0.15; return true; }
             if (keyboard.IsKeyPressed(Keys.Up)    || keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.W))
-            { var (dx, dy) = FpAngleToDir(_fpAngle); GameEngine.Instance.ProcessPlayerTurn( dx,  dy); return true; }
+            { var (dx, dy) = FpAngleToDir(_fpAngle); MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn( dx,  dy); return true; }
             if (keyboard.IsKeyPressed(Keys.Down)  || keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.S))
-            { var (dx, dy) = FpAngleToDir(_fpAngle); GameEngine.Instance.ProcessPlayerTurn(-dx, -dy); return true; }
+            { var (dx, dy) = FpAngleToDir(_fpAngle); MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(-dx, -dy); return true; }
             if (keyboard.IsKeyPressed(Keys.NumPad7))
-            { var (dx, dy) = FpAngleToDir(_fpAngle - Math.PI * 0.5); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+            { var (dx, dy) = FpAngleToDir(_fpAngle - Math.PI * 0.5); MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
             if (keyboard.IsKeyPressed(Keys.NumPad9))
-            { var (dx, dy) = FpAngleToDir(_fpAngle + Math.PI * 0.5); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+            { var (dx, dy) = FpAngleToDir(_fpAngle + Math.PI * 0.5); MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(dx, dy); return true; }
+
+            // X: examine wall ahead for secret passages (FP only)
+            if (keyboard.IsKeyPressed(Keys.X))
+            {
+                var ppos = GameEngine.Instance.EntityManager
+                    .GetComponent<PositionComponent>(GameEngine.Instance.PlayerEntity);
+                if (ppos != null)
+                {
+                    var (fdx, fdy) = FpAngleToDir(_fpAngle);
+                    GameEngine.Instance.TryRevealHiddenDoor(ppos.X + fdx, ppos.Y + fdy);
+                }
+                return true;
+            }
         }
         else
         {
-            if (keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.Up))    { GameEngine.Instance.ProcessPlayerTurn( 0, -1); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.Down))  { GameEngine.Instance.ProcessPlayerTurn( 0,  1); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad4) || keyboard.IsKeyPressed(Keys.Left))  { GameEngine.Instance.ProcessPlayerTurn(-1,  0); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad6) || keyboard.IsKeyPressed(Keys.Right)) { GameEngine.Instance.ProcessPlayerTurn( 1,  0); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad7))                                      { GameEngine.Instance.ProcessPlayerTurn(-1, -1); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad9))                                      { GameEngine.Instance.ProcessPlayerTurn( 1, -1); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad1))                                      { GameEngine.Instance.ProcessPlayerTurn(-1,  1); return true; }
-            if (keyboard.IsKeyPressed(Keys.NumPad3))                                      { GameEngine.Instance.ProcessPlayerTurn( 1,  1); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad8) || keyboard.IsKeyPressed(Keys.Up))    { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn( 0, -1); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad2) || keyboard.IsKeyPressed(Keys.Down))  { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn( 0,  1); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad4) || keyboard.IsKeyPressed(Keys.Left))  { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(-1,  0); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad6) || keyboard.IsKeyPressed(Keys.Right)) { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn( 1,  0); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad7))                                      { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(-1, -1); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad9))                                      { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn( 1, -1); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad1))                                      { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn(-1,  1); return true; }
+            if (keyboard.IsKeyPressed(Keys.NumPad3))                                      { MusicPlayer.PlayFootstep(); GameEngine.Instance.ProcessPlayerTurn( 1,  1); return true; }
         }
 
         // Shared action keys

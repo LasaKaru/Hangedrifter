@@ -17,7 +17,8 @@ public class GameMap
     public List<SadRogue.Primitives.Point> ItemSpawnPoints  { get; } = new();
     public List<SadRogue.Primitives.Point> ChestPositions   { get; } = new();
     public List<SadRogue.Primitives.Point> TrapPositions    { get; } = new();
-    public List<SadRogue.Primitives.Point> DoorPositions    { get; } = new();
+    public List<SadRogue.Primitives.Point> DoorPositions       { get; } = new();
+    public List<SadRogue.Primitives.Point> HiddenDoorPositions { get; } = new();
 
     public GameMap(int width, int height, int floor = 1, MapTheme theme = MapTheme.Dungeon)
     {

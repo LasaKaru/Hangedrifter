@@ -27,5 +27,5 @@ public class FeatureComponent
     public int      TrapDamage { get; set; } = 3;
 }
 
-public enum FeatureType { Door, StairsDown, StairsUp, Chest, Trap }
+public enum FeatureType { Door, StairsDown, StairsUp, Chest, Trap, HiddenDoor }
 public enum TrapType    { Spike, Poison, Fire, Alarm }

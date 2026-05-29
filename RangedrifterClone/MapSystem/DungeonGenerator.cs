@@ -59,6 +59,7 @@ public class DungeonGenerator
         PlaceStairs(rooms);
         PlaceSpawnPoints(rooms);
         PlaceDoors();
+        PlaceHiddenDoors();
         PlaceChestsAndTraps(rooms);
         AddScenery();
         return _map;
@@ -285,6 +286,33 @@ public class DungeonGenerator
                 _map.SetTile(x, y, door);
                 _map.DoorPositions.Add(new SadRogue.Primitives.Point(x, y));
             }
+        }
+    }
+
+    // ── Hidden doors ─────────────────────────────────────────────────────
+    // Find wall tiles that have floor on both sides along the same axis.
+    // These become secret passages the player can reveal with X.
+    private void PlaceHiddenDoors()
+    {
+        int target = 2 + _rng.Next(3); // 2–4 per floor
+        var candidates = new List<(int x, int y)>();
+        for (int y = 2; y < _height - 2; y++)
+        for (int x = 2; x < _width  - 2; x++)
+        {
+            if (_map.GetTile(x, y).Type != TileType.Wall) continue;
+            if (_map.DoorPositions.Contains(new SadRogue.Primitives.Point(x, y))) continue;
+            bool nsOpen = _map.GetTile(x, y - 1).Type == TileType.Floor
+                       && _map.GetTile(x, y + 1).Type == TileType.Floor;
+            bool ewOpen = _map.GetTile(x - 1, y).Type == TileType.Floor
+                       && _map.GetTile(x + 1, y).Type == TileType.Floor;
+            if (nsOpen || ewOpen) candidates.Add((x, y));
+        }
+        for (int i = 0; i < target && candidates.Count > 0; i++)
+        {
+            int idx = _rng.Next(candidates.Count);
+            _map.HiddenDoorPositions.Add(
+                new SadRogue.Primitives.Point(candidates[idx].x, candidates[idx].y));
+            candidates.RemoveAt(idx);
         }
     }
 

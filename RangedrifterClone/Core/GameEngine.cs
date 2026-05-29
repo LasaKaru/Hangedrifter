@@ -312,6 +312,14 @@ public class GameEngine
             });
         }
 
+        // Hidden doors (invisible wall — revealed by pressing X)
+        foreach (var hdp in map.HiddenDoorPositions)
+        {
+            var hd = EntityManager.CreateEntity();
+            EntityManager.AddComponent(hd, new PositionComponent { X = hdp.X, Y = hdp.Y });
+            EntityManager.AddComponent(hd, new FeatureComponent  { Type = FeatureType.HiddenDoor });
+        }
+
         // Stairs entities
         if (map.InBounds(map.StairsDownPos.X, map.StairsDownPos.Y))
         {
@@ -877,6 +885,26 @@ public class GameEngine
 
         _fov!.ComputeFov(CurrentMap, PlayerEntity, 9);
         MessageLog.Add($"Floor {floor} — Theme: {CurrentMap.Theme}", SadRogue.Primitives.Color.Cyan);
+    }
+
+    public bool TryRevealHiddenDoor(int x, int y)
+    {
+        if (CurrentMap == null) return false;
+        foreach (var e in EntityManager.GetEntitiesWith<FeatureComponent, PositionComponent>())
+        {
+            var p    = EntityManager.GetComponent<PositionComponent>(e)!;
+            var feat = EntityManager.GetComponent<FeatureComponent>(e)!;
+            if (p.X != x || p.Y != y || feat.Type != FeatureType.HiddenDoor) continue;
+
+            EntityManager.DestroyEntity(e);
+            CurrentMap.SetTile(x, y, MapSystem.Tile.CreateFloor(CurrentMap.Theme));
+            _fov!.ComputeFov(CurrentMap, PlayerEntity, 9);
+            MessageLog.Add("*** You found a SECRET PASSAGE! ***",
+                new SadRogue.Primitives.Color(255, 230, 50));
+            MusicPlayer.PlayReveal();
+            return true;
+        }
+        return false;
     }
 }
 
